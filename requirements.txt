@@ -1,0 +1,5 @@
+opencv-python
+google-genai
+pyTelegramBotAPI
+python-dotenv
+pillow

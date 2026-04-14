@@ -1,0 +1,11 @@
+# Bỏ qua file chứa mật khẩu
+.env
+
+# Bỏ qua các ảnh chụp được để tránh nặng kho chứa
+*.jpg
+*.png
+*.jpeg
+
+# Bỏ qua các file rác của thư viện Python
+__pycache__/
+*.pyc
