@@ -1,34 +1,34 @@
-# 👁️ Vision AI Bot - Trợ lý Giám sát Camera Thông Minh
+# 👁️ Vision AI Bot - Smart Camera Monitoring Assistant
 
 ![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)
 ![Gemini AI](https://img.shields.io/badge/AI-Google_Gemini-orange.svg)
 ![OpenCV](https://img.shields.io/badge/cvision-OpenCV-green.svg)
 
-Một hệ thống trợ lý ảo thông minh chạy nội bộ, biến chiếc webcam máy tính của bạn thành một "Cỗ máy giám sát" kết nối với Telegram để phân tích hiện trường và báo động tự động. 
+An intelligent local AI agent that turns your computer's webcam into a "Surveillance Machine" integrated with Telegram for scene analysis and automatic motion-triggered alerts.
 
-## 🚀 Tính năng nổi bật
+## 🚀 Features
 
-- 🧠 **Trí tuệ Nhân tạo (Vision AI):** Khả năng quan sát và đọc hiểu hình ảnh sắc sảo bằng tiếng Việt thông qua mô hình [Google Gemini 2.5](https://aistudio.google.com/).
-- 🚨 **Radar Báo động Chuyển động:** Bắt được sự xuất hiện của bất kỳ động vật/con người nào thông qua thuật toán tính toán ma trận ma sát tĩnh lược (OpenCV `absdiff`).
-- 💬 **Điều khiển Kép qua Telegram:** Tích hợp trực tiếp lên điện thoại, yêu cầu chụp hình nhà cửa 24/7 chỉ với 1 dòng chat.
-- 🥷 **Chế độ Chạy ngầm (Daemon):** Hoạt động ẩn danh siêu nhẹ trên Windows thông qua `pythonw`, không hiện cửa sổ, không tốn tài nguyên.
-- 🛡️ **Tuyệt đối Bảo mật:** Tích hợp bộ khiên `.env` và cơ chế xác minh danh tính mã cứng (Telegram User ID) chặn mọi cuộc tấn công dòm ngó từ người lạ.
+- 🧠 **Vision AI:** Capable of observing and accurately analyzing the environment using the [Google Gemini 2.5](https://aistudio.google.com/) multimodal model.
+- 🚨 **Motion Alert Radar:** Detects any physical movement (humans/animals) in the frame using the frame differencing algorithm (OpenCV `absdiff`).
+- 💬 **Telegram Control:** Seamless integration with Telegram, allowing 24/7 on-demand capturing and monitoring right from your phone.
+- 🥷 **Ghost Daemon Mode:** Runs completely silently in the background on Windows using `pythonw` with ZERO terminal windows. 
+- 🛡️ **Absolute Security:** Environment variables (`.env`) for secrets and hardcore identity verification (Telegram User ID to reject any unauthorized snoopers from accessing the camera).
 
-## 🛠️ Hướng dẫn cài đặt
+## 🛠️ Installation Guide
 
-### 1. Chuẩn bị
-Tải dự án về máy và cài đặt các thư viện nền tảng:
+### 1. Requirements Prep
+Clone this repository and install the dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Thiết lập Biến môi trường
-Cực kỳ quan trọng: Để kích hoạt sự liên kết số, bạn cần chuẩn bị khóa để cấp cho AI.
-* Đổi tên file `.env.example` thành `.env`
-* Lấy mã Telegram Token từ Bot của bạn qua ứng dụng Telegram (tìm **@BotFather**).
-* Lấy mã API AI qua **Google AI Studio**.
-* Lấy mã ID Cá nhân qua **@userinfobot**.
-* Mở file `.env` lên và điền vào các khóa bạn vừa lấy (lưu ý không up file `.env` này lên mạng):
+### 2. Environment Setup
+CRITICAL: To enable secure connections, you must provide your API keys.
+* Rename `.env.example` to `.env`
+* Obtain your Telegram Bot Token via **@BotFather** on Telegram.
+* Get your free Gemini API key from **Google AI Studio**.
+* Get your Personal Telegram ID via **@userinfobot**.
+* Open `.env` and fill in the values (never upload this file publicly):
 
 ```env
 TELEGRAM_BOT_TOKEN="Your_telegram_Token..."
@@ -36,19 +36,19 @@ GEMINI_API_KEY="Your_API_KEY..."
 ALLOWED_USER_ID="Your_ID"
 ```
 
-## 🎮 Cách sử dụng & Điều khiển
+## 🎮 Usage & Controls
 
-Bạn không cần mở Terminal đen ngòm để điều khiển!
+You don't need to touch the terminal to run this!
 
-1. Nháy đúp vào `Chay_Bot_Ngam.vbs` để đưa linh hồn Bot vào trạng thái hoạt động ngầm. (Bạn có thể ném file này vào thư mục `Startup` của Windows để tự động đánh thức Bot khi PC khởi động).
-2. Nếu bạn không muốn bị giám sát hoặc muốn nghỉ ngơi, bấm `Tat_Bot.bat` để quét sạch bộ nhớ.
+1. Double-click `Chay_Bot_Ngam.vbs` to launch the logic into background mode. (Pro-tip: Throw this file into your Windows `Startup` folder so the bot wakes up alongside your PC).
+2. If you want some privacy or need to shut it down, simply run `Tat_Bot.bat` to eliminate the silent background process.
 
-### 🤖 Các câu lệnh tương tác trên ứng dụng Telegram
-| Cú pháp / Hành động | Hiệu suất mang lại |
+### 🤖 Telegram Bot Commands
+| Command / Action | Functionality |
 | :--- | :--- |
-| *Nhắn bằng văn bản thường* | Chụp ngay một file ảnh hiện trường tức thì, rồi đưa bức ảnh và tin nhắn của bạn cho AI đọc hiểu. |
-| `/auto` | **BẬT Lưới dò chuyển động**. Nhạy cảm với mọi sự xê dịch trong phạm vi khung hình. Nếu có đột nhập, tự động chụp hình và gửi báo động. Có thời gian trễ 10s để chống nhiễu (spam). |
-| `/stop` | **TẮT Radar**. Giải phóng cổng vật lý của Camera và nhường đường cho thế giới riêng của người dùng. |
+| *Standard Text Message* | Immediately captures a snapshot of the current environment, then passes both the photo and your text message to the AI for analysis. |
+| `/auto` | **TURN ON Motion Radar**. Detects shifts within the camera frame. If an intrusion is detected, it snaps a photo and blasts an alert to your phone. Includes a 10s cooldown to prevent notification spam. |
+| `/stop` | **TURN OFF Radar**. Releases the camera hardware and pauses monitoring, ensuring user privacy and saving power. |
 
 ---
-*Dự án phát triển dựa trên niềm đam mê sáng tạo hệ thống Hệ Điều Hành Tự Động (AI Agents).*
+*Developed with a passion for Automated OS Integrations and AI Agents.*
