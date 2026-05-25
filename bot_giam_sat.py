@@ -1,19 +1,16 @@
 import telebot
 import cv2
-import html
 import sys
 import os
 import json
 import logging
-import mimetypes
 import shutil
 import subprocess
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from PIL import Image
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from dashboard_server import DashboardContext, start_dashboard_server
 from google import genai
 from dotenv import load_dotenv
 
@@ -355,601 +352,6 @@ def tail_error_log(max_lines=20):
 def format_error_log_message():
     log_text = tail_error_log().replace("```", "` ` `")
     return f"🧯 LOG LỖI GẦN NHẤT\n\n```text\n{log_text}\n```"
-
-def escape_html(value):
-    return html.escape(str(value), quote=True)
-
-def dashboard_media_url(path):
-    if not path:
-        return ""
-    return f"/media?path={quote(path)}"
-
-DASHBOARD_TABS = (
-    ("status", "Trạng thái"),
-    ("history", "Lịch sử"),
-    ("settings", "Setting"),
-    ("errors", "Log lỗi")
-)
-DASHBOARD_TAB_KEYS = {key for key, _ in DASHBOARD_TABS}
-
-def normalize_dashboard_tab(tab):
-    if tab in DASHBOARD_TAB_KEYS:
-        return tab
-    return "status"
-
-def dashboard_tab_url(tab, history_filter="all"):
-    params = {"tab": normalize_dashboard_tab(tab)}
-    if params["tab"] == "history":
-        params["filter"] = normalize_dashboard_history_filter(history_filter)
-    return "/?" + urlencode(params)
-
-def render_dashboard_tabs(active_tab, history_filter="all"):
-    links = []
-    active_tab = normalize_dashboard_tab(active_tab)
-    for tab_key, label in DASHBOARD_TABS:
-        active_class = " active" if tab_key == active_tab else ""
-        links.append(
-            f'<a class="tab-link{active_class}" href="{dashboard_tab_url(tab_key, history_filter)}">'
-            f"{escape_html(label)}</a>"
-        )
-    return f'<nav class="tabs">{"".join(links)}</nav>'
-
-DASHBOARD_HISTORY_FILTERS = (
-    ("all", "Tất cả"),
-    ("today", "Hôm nay"),
-    ("with_video", "Có video"),
-    ("without_video", "Không có video"),
-    ("newest", "Mới nhất")
-)
-DASHBOARD_HISTORY_FILTER_KEYS = {key for key, _ in DASHBOARD_HISTORY_FILTERS}
-
-def normalize_dashboard_history_filter(history_filter):
-    if history_filter in DASHBOARD_HISTORY_FILTER_KEYS:
-        return history_filter
-    return "all"
-
-def alert_timestamp_value(entry):
-    try:
-        return float(entry.get("timestamp") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-def alert_has_dashboard_video(entry):
-    video_path = entry.get("video_path")
-    return is_safe_alert_media_path(video_path) and os.path.exists(absolute_from_base(video_path))
-
-def alert_is_today(entry):
-    timestamp = alert_timestamp_value(entry)
-    if not timestamp:
-        return False
-    today = time.strftime("%Y-%m-%d", time.localtime())
-    alert_day = time.strftime("%Y-%m-%d", time.localtime(timestamp))
-    return alert_day == today
-
-def filter_dashboard_history(entries, history_filter):
-    history_filter = normalize_dashboard_history_filter(history_filter)
-    sorted_entries = sorted(entries, key=alert_timestamp_value, reverse=True)
-
-    if history_filter == "today":
-        return [entry for entry in sorted_entries if alert_is_today(entry)]
-    if history_filter == "with_video":
-        return [entry for entry in sorted_entries if alert_has_dashboard_video(entry)]
-    if history_filter == "without_video":
-        return [entry for entry in sorted_entries if not alert_has_dashboard_video(entry)]
-    if history_filter == "newest":
-        return sorted_entries[:10]
-    return sorted_entries
-
-def dashboard_filter_url(history_filter):
-    return "/?" + urlencode({"tab": "history", "filter": history_filter})
-
-def render_dashboard_filter_controls(active_filter, shown_count, total_count):
-    links = []
-    for filter_key, label in DASHBOARD_HISTORY_FILTERS:
-        active_class = " active" if filter_key == active_filter else ""
-        links.append(
-            f'<a class="filter-link{active_class}" href="{dashboard_filter_url(filter_key)}">'
-            f"{escape_html(label)}</a>"
-        )
-
-    return (
-        '<div class="filter-bar">'
-        '<div class="filter-links">'
-        f"{''.join(links)}"
-        "</div>"
-        f'<span class="filter-count">Đang hiển thị {shown_count}/{total_count}</span>'
-        "</div>"
-    )
-
-def render_dashboard_history(entries, active_filter="all"):
-    if not entries:
-        return '<section class="empty">Chưa có cảnh báo nào.</section>'
-
-    cards = []
-    for entry in entries:
-        timestamp = format_timestamp(entry.get("timestamp"))
-        analysis = text_preview(entry.get("analysis"), max_length=320)
-        video_status = entry.get("video_status") or "Không có video"
-        image_path = entry.get("image_path")
-        video_path = entry.get("video_path")
-        alert_id = str(entry.get("id") or "")
-
-        delete_html = ""
-        if alert_id:
-            delete_html = (
-                '<form class="delete-form" method="post" action="/delete-alert" '
-                'onsubmit="return confirm(\'Xóa cảnh báo này?\')">'
-                f'<input type="hidden" name="id" value="{escape_html(alert_id)}">'
-                f'<input type="hidden" name="filter" value="{escape_html(active_filter)}">'
-                '<button class="delete-button" type="submit">Xóa</button>'
-                '</form>'
-            )
-
-        image_html = ""
-        if is_safe_alert_media_path(image_path) and os.path.exists(absolute_from_base(image_path)):
-            image_html = (
-                f'<a href="{dashboard_media_url(image_path)}" target="_blank">'
-                f'<img src="{dashboard_media_url(image_path)}" alt="Ảnh cảnh báo"></a>'
-            )
-
-        video_html = ""
-        if is_safe_alert_media_path(video_path) and os.path.exists(absolute_from_base(video_path)):
-            video_url = dashboard_media_url(video_path)
-            video_html = (
-                f'<video controls preload="metadata">'
-                f'<source src="{video_url}" type="video/mp4">'
-                "Trình duyệt không phát được video này."
-                "</video>"
-                f'<a class="media-link" href="{video_url}" target="_blank">Mở/tải video</a>'
-            )
-
-        cards.append(
-            "<article class=\"history-card\">"
-            "<div class=\"history-meta\">"
-            "<div>"
-            f"<strong>{escape_html(timestamp)}</strong>"
-            f"<span>{escape_html(video_status)}</span>"
-            "</div>"
-            f"{delete_html}"
-            "</div>"
-            f"<p>{escape_html(analysis)}</p>"
-            f"{image_html}{video_html}"
-            "</article>"
-        )
-    return "\n".join(cards)
-
-def selected_attr(current_value, option_value):
-    return " selected" if current_value == option_value else ""
-
-def render_dashboard_settings_form(settings_snapshot):
-    numeric_fields = (
-        "motion_area_threshold",
-        "alert_cooldown_seconds",
-        "alert_video_seconds",
-        "alert_video_fps"
-    )
-    rows = []
-    for field in numeric_fields:
-        min_value, max_value = SETTING_LIMITS[field]
-        rows.append(
-            "<tr>"
-            f"<th><label for=\"setting_{field}\">{escape_html(SETTING_LABELS[field])}</label></th>"
-            "<td>"
-            f"<input id=\"setting_{field}\" name=\"{field}\" type=\"number\" "
-            f"value=\"{settings_snapshot[field]}\" min=\"{min_value}\" max=\"{max_value}\" step=\"1\">"
-            f"<span class=\"setting-hint\">{min_value}-{max_value}{escape_html(SETTING_UNITS[field])}</span>"
-            "</td>"
-            "</tr>"
-        )
-
-    history_options = "".join(
-        f'<option value="{choice}"{selected_attr(settings_snapshot["alert_history_limit"], choice)}>{choice} cảnh báo</option>'
-        for choice in HISTORY_LIMIT_CHOICES
-    )
-    rows.append(
-        "<tr>"
-        f"<th><label for=\"setting_alert_history_limit\">{escape_html(SETTING_LABELS['alert_history_limit'])}</label></th>"
-        "<td>"
-        f"<select id=\"setting_alert_history_limit\" name=\"alert_history_limit\">{history_options}</select>"
-        "<span class=\"setting-hint\">Khi giảm số lượng, bot xóa record cũ và media tương ứng.</span>"
-        "</td>"
-        "</tr>"
-    )
-
-    for field, label in (
-        ("send_video", "Gửi video cảnh báo"),
-        ("use_gemini_analysis", "Phân tích Gemini")
-    ):
-        rows.append(
-            "<tr>"
-            f"<th><label for=\"setting_{field}\">{escape_html(label)}</label></th>"
-            "<td>"
-            f"<select id=\"setting_{field}\" name=\"{field}\">"
-            f"<option value=\"true\"{selected_attr(settings_snapshot[field], True)}>BẬT</option>"
-            f"<option value=\"false\"{selected_attr(settings_snapshot[field], False)}>TẮT</option>"
-            "</select>"
-            "</td>"
-            "</tr>"
-        )
-
-    return (
-        '<form class="settings-form" method="post" action="/update-settings">'
-        f"<table>{''.join(rows)}</table>"
-        '<button class="save-button" type="submit">Lưu setting</button>'
-        '<p class="setting-note">Setting được lưu vào settings.json và vẫn còn sau khi restart bot.</p>'
-        "</form>"
-    )
-
-def bool_from_dashboard(value, default):
-    if value is None:
-        return default
-    return str(value).strip().lower() in ("true", "1", "yes", "on", "bat", "bật")
-
-def update_dashboard_settings(form):
-    updates = {}
-    current = get_settings_snapshot()
-
-    for field, (min_value, max_value) in SETTING_LIMITS.items():
-        raw_value = form.get(field, [current[field]])[0]
-        value = clamp_int(raw_value, current[field], min_value, max_value)
-        if field == "alert_history_limit" and value not in HISTORY_LIMIT_CHOICES:
-            value = min(HISTORY_LIMIT_CHOICES, key=lambda choice: abs(choice - value))
-        updates[field] = value
-
-    updates["send_video"] = bool_from_dashboard(
-        form.get("send_video", [current["send_video"]])[0],
-        current["send_video"]
-    )
-    updates["use_gemini_analysis"] = bool_from_dashboard(
-        form.get("use_gemini_analysis", [current["use_gemini_analysis"]])[0],
-        current["use_gemini_analysis"]
-    )
-
-    for field, value in updates.items():
-        update_setting(field, value)
-
-    if updates["alert_history_limit"] != current["alert_history_limit"]:
-        trim_alert_history(updates["alert_history_limit"])
-
-def render_dashboard_html(notice="", history_filter="all", active_tab="status"):
-    active_tab = normalize_dashboard_tab(active_tab)
-    history_filter = normalize_dashboard_history_filter(history_filter)
-    settings_snapshot = get_settings_snapshot()
-    all_history_entries = get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
-    history_entries = filter_dashboard_history(all_history_entries, history_filter)
-    filter_controls = render_dashboard_filter_controls(
-        history_filter,
-        len(history_entries),
-        len(all_history_entries)
-    )
-    camera_ok, camera_status = get_camera_status_for_dashboard()
-    radar_status = "BẬT" if auto_mode_active else "TẮT"
-    logs_size = format_size(get_directory_size(LOG_DIR))
-    uptime = format_duration(time.time() - BOT_START_TIME)
-    error_log = escape_html(tail_error_log())
-
-    settings_form = render_dashboard_settings_form(settings_snapshot)
-
-    notice_html = ""
-    if notice:
-        notice_html = f'<section class="notice">{escape_html(notice)}</section>'
-
-    camera_class = "ok" if camera_ok else "bad"
-    tabs_html = render_dashboard_tabs(active_tab, history_filter)
-    status_content = f"""
-    <section class="grid">
-      <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
-      <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_status)}</strong></div>
-      <div class="card"><span>Lịch sử</span><strong>{len(all_history_entries)}/{settings_snapshot["alert_history_limit"]}</strong></div>
-      <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
-    </section>
-
-    <section class="panel tab-panel">
-      <h2>Trạng thái</h2>
-      <table>
-        <tr><th>Uptime</th><td>{escape_html(uptime)}</td></tr>
-        <tr><th>Cảnh báo gần nhất</th><td>{escape_html(format_timestamp(last_alert_timestamp))}</td></tr>
-        <tr><th>Dashboard local</th><td>{escape_html(DASHBOARD_URL)}</td></tr>
-      </table>
-    </section>"""
-    history_content = f"""
-    <section class="tab-panel">
-      <h2>Lịch sử cảnh báo</h2>
-      {filter_controls}
-      <section class="history">{render_dashboard_history(history_entries, history_filter)}</section>
-    </section>"""
-    settings_content = f"""
-    <section class="panel tab-panel">
-      <h2>Setting</h2>
-      {settings_form}
-    </section>"""
-    errors_content = f"""
-    <section class="panel tab-panel">
-      <h2>Log lỗi gần nhất</h2>
-      <pre>{error_log}</pre>
-    </section>"""
-    tab_content = {
-        "status": status_content,
-        "history": history_content,
-        "settings": settings_content,
-        "errors": errors_content
-    }[active_tab]
-
-    return f"""<!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="30">
-  <title>Vision Bot Dashboard</title>
-  <style>
-    :root {{
-      color-scheme: light dark;
-      --bg: #f5f7fb;
-      --panel: #ffffff;
-      --text: #172033;
-      --muted: #647084;
-      --line: #d9e0ea;
-      --accent: #006d77;
-      --ok: #117a44;
-      --bad: #a32b2b;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      :root {{
-        --bg: #121620;
-        --panel: #1b2230;
-        --text: #eef3fb;
-        --muted: #aab4c5;
-        --line: #303a4c;
-        --accent: #56b6c2;
-      }}
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }}
-    header {{
-      padding: 20px 24px;
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }}
-    h1 {{ margin: 0 0 4px; font-size: 22px; }}
-    main {{ padding: 20px 24px 40px; max-width: 1220px; margin: 0 auto; }}
-    .muted {{ color: var(--muted); }}
-    .tabs {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }}
-    .tab-link {{ border: 1px solid var(--line); border-radius: 8px; color: var(--text); padding: 8px 11px; text-decoration: none; }}
-    .tab-link.active {{ background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }}
-    .tab-panel {{ margin-top: 16px; }}
-    .grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
-    .card, .history-card, .panel {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-    }}
-    .card span {{ display: block; color: var(--muted); font-size: 12px; }}
-    .card strong {{ font-size: 18px; }}
-    .ok {{ color: var(--ok); }}
-    .bad {{ color: var(--bad); }}
-    .layout {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }}
-    h2 {{ font-size: 16px; margin: 0 0 10px; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }}
-    th {{ color: var(--muted); width: 45%; font-weight: 600; }}
-    .history {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }}
-    .history-meta {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; color: var(--muted); margin-bottom: 8px; }}
-    .history-meta span {{ display: block; }}
-    .filter-bar {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 12px; flex-wrap: wrap; }}
-    .filter-links {{ display: flex; flex-wrap: wrap; gap: 8px; }}
-    .filter-link {{ border: 1px solid var(--line); border-radius: 999px; color: var(--text); padding: 6px 10px; text-decoration: none; }}
-    .filter-link.active {{ background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }}
-    .filter-count {{ color: var(--muted); }}
-    .settings-form input, .settings-form select {{ width: min(260px, 100%); padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); font: inherit; }}
-    .setting-hint {{ display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }}
-    .setting-note {{ color: var(--muted); margin: 12px 0 0; }}
-    .save-button {{ margin-top: 12px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 9px 13px; }}
-    .delete-form {{ margin: 0; }}
-    .delete-button {{ border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--bad); cursor: pointer; font: inherit; font-weight: 700; padding: 5px 9px; }}
-    .delete-button:hover {{ border-color: var(--bad); }}
-    .history-card img, .history-card video {{ width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; border: 1px solid var(--line); background: #000; margin-top: 8px; }}
-    .media-link {{ display: inline-block; margin-top: 8px; color: var(--accent); font-weight: 700; text-decoration: none; }}
-    .notice {{ margin-bottom: 14px; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--panel); }}
-    pre {{ white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; color: var(--muted); }}
-    .empty {{ padding: 20px; color: var(--muted); }}
-    @media (max-width: 860px) {{
-      .grid, .layout, .history {{ grid-template-columns: 1fr; }}
-      header, main {{ padding-left: 14px; padding-right: 14px; }}
-    }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Vision Bot Dashboard</h1>
-    <div class="muted">Chỉ mở trên máy tính này: {escape_html(DASHBOARD_URL)} · Tự refresh mỗi 30 giây</div>
-    {tabs_html}
-  </header>
-  <main>
-    {notice_html}
-    {tab_content}
-  </main>
-</body>
-</html>"""
-
-def parse_range_header(range_header, file_size):
-    if not range_header or not range_header.startswith("bytes="):
-        return None, False
-
-    range_spec = range_header[len("bytes="):].split(",", 1)[0].strip()
-    if "-" not in range_spec:
-        return None, True
-
-    start_text, end_text = range_spec.split("-", 1)
-    try:
-        if start_text == "":
-            suffix_length = int(end_text)
-            if suffix_length <= 0:
-                return None, True
-            start = max(file_size - suffix_length, 0)
-            end = file_size - 1
-        else:
-            start = int(start_text)
-            end = int(end_text) if end_text else file_size - 1
-    except ValueError:
-        return None, True
-
-    end = min(end, file_size - 1)
-    if start < 0 or start >= file_size or end < start:
-        return None, True
-    return (start, end), True
-
-def send_dashboard_file(handler, absolute_path, content_type):
-    file_size = os.path.getsize(absolute_path)
-    byte_range, range_requested = parse_range_header(handler.headers.get("Range"), file_size)
-
-    if range_requested and byte_range is None:
-        handler.send_response(416)
-        handler.send_header("Content-Range", f"bytes */{file_size}")
-        handler.send_header("Accept-Ranges", "bytes")
-        handler.send_header("Content-Length", "0")
-        handler.end_headers()
-        return
-
-    if byte_range is None:
-        start = 0
-        end = file_size - 1
-        status_code = 200
-    else:
-        start, end = byte_range
-        status_code = 206
-
-    content_length = end - start + 1
-    handler.send_response(status_code)
-    handler.send_header("Content-Type", content_type)
-    handler.send_header("Accept-Ranges", "bytes")
-    handler.send_header("Content-Length", str(content_length))
-    if status_code == 206:
-        handler.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
-    handler.send_header("Cache-Control", "no-store")
-    handler.end_headers()
-
-    remaining = content_length
-    with open(absolute_path, "rb") as file:
-        file.seek(start)
-        while remaining > 0:
-            chunk = file.read(min(64 * 1024, remaining))
-            if not chunk:
-                break
-            try:
-                handler.wfile.write(chunk)
-            except (ConnectionError, TimeoutError):
-                return
-            remaining -= len(chunk)
-
-def serve_dashboard_media(handler, query):
-    media_path = query.get("path", [""])[0]
-    if not is_safe_alert_media_path(media_path):
-        handler.send_error(403)
-        return
-
-    absolute_path = os.path.abspath(absolute_from_base(media_path))
-    if not os.path.isfile(absolute_path):
-        handler.send_error(404)
-        return
-
-    try:
-        content_type = mimetypes.guess_type(absolute_path)[0] or "application/octet-stream"
-        send_dashboard_file(handler, absolute_path, content_type)
-    except OSError as e:
-        log_error(f"Khong doc duoc media dashboard: {absolute_path}", e)
-        handler.send_error(404)
-
-def redirect_dashboard(handler, location):
-    handler.send_response(303)
-    handler.send_header("Location", location)
-    handler.send_header("Cache-Control", "no-store")
-    handler.send_header("Content-Length", "0")
-    handler.end_headers()
-
-class DashboardRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        parsed_url = urlparse(self.path)
-        if parsed_url.path in ("/", "/index.html"):
-            query = parse_qs(parsed_url.query)
-            active_tab = normalize_dashboard_tab(query.get("tab", ["status"])[0])
-            history_filter = normalize_dashboard_history_filter(query.get("filter", ["all"])[0])
-            notice = ""
-            if query.get("deleted") == ["1"]:
-                notice = "Đã xóa cảnh báo."
-            elif query.get("deleted") == ["0"]:
-                notice = "Không tìm thấy cảnh báo để xóa."
-            elif query.get("saved") == ["1"]:
-                notice = "Đã lưu setting."
-
-            body = render_dashboard_html(notice, history_filter, active_tab).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
-        if parsed_url.path == "/media":
-            serve_dashboard_media(self, parse_qs(parsed_url.query))
-            return
-
-        self.send_error(404)
-
-    def do_POST(self):
-        parsed_url = urlparse(self.path)
-        try:
-            content_length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            content_length = 0
-
-        body = self.rfile.read(min(content_length, 4096)).decode("utf-8", errors="replace")
-        form = parse_qs(body)
-
-        if parsed_url.path == "/update-settings":
-            update_dashboard_settings(form)
-            redirect_dashboard(self, "/?" + urlencode({"tab": "settings", "saved": "1"}))
-            return
-
-        if parsed_url.path != "/delete-alert":
-            self.send_error(404)
-            return
-
-        alert_id = form.get("id", [""])[0]
-        history_filter = normalize_dashboard_history_filter(form.get("filter", ["all"])[0])
-        deleted = delete_alert_history_entry(alert_id)
-        redirect_dashboard(
-            self,
-            "/?" + urlencode({
-                "tab": "history",
-                "filter": history_filter,
-                "deleted": "1" if deleted else "0"
-            })
-        )
-
-    def log_message(self, format, *args):
-        return
-
-def start_dashboard_server():
-    try:
-        server = ThreadingHTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardRequestHandler)
-    except OSError as e:
-        log_error(f"Khong khoi dong duoc dashboard local tai {DASHBOARD_URL}", e)
-        return
-
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    print(f"Dashboard local dang chay tai {DASHBOARD_URL}")
 
 def add_alert_history(entry):
     with history_lock:
@@ -1347,6 +749,43 @@ def get_camera_status_for_dashboard():
     if last_camera_status and last_camera_status != "Chưa kiểm tra camera":
         return camera_online, last_camera_status
     return False, "Camera chưa kiểm tra trên dashboard"
+
+def is_radar_active():
+    return auto_mode_active
+
+def get_last_alert_timestamp():
+    return last_alert_timestamp
+
+def create_dashboard_context():
+    return DashboardContext(
+        host=DASHBOARD_HOST,
+        port=DASHBOARD_PORT,
+        url=DASHBOARD_URL,
+        log_dir=LOG_DIR,
+        settings_limits=SETTING_LIMITS,
+        setting_labels=SETTING_LABELS,
+        setting_units=SETTING_UNITS,
+        history_limit_choices=HISTORY_LIMIT_CHOICES,
+        bot_start_time=BOT_START_TIME,
+        get_settings_snapshot=get_settings_snapshot,
+        get_alert_history_snapshot=get_alert_history_snapshot,
+        get_camera_status=get_camera_status_for_dashboard,
+        is_radar_active=is_radar_active,
+        format_size=format_size,
+        get_directory_size=get_directory_size,
+        format_duration=format_duration,
+        tail_error_log=tail_error_log,
+        format_timestamp=format_timestamp,
+        last_alert_timestamp=get_last_alert_timestamp,
+        text_preview=text_preview,
+        is_safe_alert_media_path=is_safe_alert_media_path,
+        absolute_from_base=absolute_from_base,
+        delete_alert_history_entry=delete_alert_history_entry,
+        update_setting=update_setting,
+        trim_alert_history=trim_alert_history,
+        clamp_int=clamp_int,
+        log_error=log_error
+    )
 
 def format_duration(seconds):
     seconds = max(0, int(seconds))
@@ -1967,6 +1406,6 @@ if __name__ == "__main__":
         print("❌ LỖI: Token vắng mặt")
     else:
         print("🚀 Khởi chạy hệ điều hành BOT GIÁM SÁT KÉP (Nhận lệnh liên tục!).")
-        start_dashboard_server()
+        start_dashboard_server(create_dashboard_context())
         send_startup_notification()
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
