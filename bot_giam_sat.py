@@ -352,6 +352,10 @@ def clear_pending_setting_input(message):
     with pending_setting_lock:
         pending_setting_inputs.pop(pending_key_from_message(message), None)
 
+def clear_pending_setting_input_from_call(call):
+    with pending_setting_lock:
+        pending_setting_inputs.pop(pending_key_from_call(call), None)
+
 def build_setting_prompt(setting_name):
     label = SETTING_LABELS[setting_name]
     unit = SETTING_UNITS[setting_name]
@@ -408,6 +412,7 @@ def adjust_numeric_setting(setting_name, delta):
 
 def build_main_menu():
     keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
+    keyboard.add(telebot.types.InlineKeyboardButton("📸 Chụp ngay", callback_data="menu:capture"))
     keyboard.add(
         telebot.types.InlineKeyboardButton("🟢 Bật Radar", callback_data="menu:auto_on"),
         telebot.types.InlineKeyboardButton("🔴 Tắt Radar", callback_data="menu:auto_off")
@@ -469,6 +474,51 @@ def ask_ai(image_path, user_question):
         contents=[prompt, img]
     )
     return response.text
+
+def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
+    global auto_mode_active
+
+    if reply_to_message is None:
+        bot.send_message(chat_id, "👁️ Đang chụp ảnh phân tích theo lệnh...")
+    else:
+        bot.reply_to(reply_to_message, "👁️ Đang chụp ảnh phân tích theo lệnh...")
+
+    was_auto = auto_mode_active
+    if was_auto:
+        auto_mode_active = False
+        time.sleep(1.5)
+
+    camera = None
+    success = False
+    try:
+        camera = cv2.VideoCapture(0)
+        time.sleep(1)
+        success, img = camera.read()
+    finally:
+        if camera is not None:
+            camera.release()
+        if was_auto:
+            auto_mode_active = True
+
+    if not success:
+        error_message = "❌ Lỗi: Không thể khởi động Camera. Có rào cản từ hệ thống."
+        if reply_to_message is None:
+            bot.send_message(chat_id, error_message)
+        else:
+            bot.reply_to(reply_to_message, error_message)
+        return
+
+    image_path = os.path.join(BASE_DIR, "anh_telegram.jpg")
+    cv2.imwrite(image_path, img)
+
+    try:
+        answer = ask_ai(image_path, question)
+        caption = f"🤖:\n\n{answer}"
+    except Exception as e:
+        caption = f"📸 Ảnh đã chụp\n⚠️ Lỗi Tín hiệu Não từ Google: {e}"
+
+    with open(image_path, 'rb') as photo:
+        bot.send_photo(chat_id, photo, caption=caption)
 
 def format_timestamp(timestamp):
     if timestamp is None:
@@ -872,6 +922,15 @@ def handle_menu_callback(call):
         edit_menu_message(call, format_status_message(), build_main_menu())
         return
 
+    if call.data == "menu:capture":
+        clear_pending_setting_input_from_call(call)
+        bot.answer_callback_query(call.id, "Đang chụp ảnh")
+        capture_and_analyze_environment(
+            call.message.chat.id,
+            "Hãy mô tả ngắn gọn camera hiện đang thấy gì và có điều gì đáng chú ý không?"
+        )
+        return
+
     if call.data == "menu:history":
         bot.answer_callback_query(call.id, "Đang gửi lịch sử")
         edit_menu_message(call, "🧾 Đang gửi lịch sử cảnh báo gần nhất...", build_main_menu())
@@ -943,39 +1002,11 @@ def handle_menu_callback(call):
 @bot.message_handler(func=lambda message: True)
 def handle_user_message(message):
     if not verify_user(message): return
-    global auto_mode_active
 
     if handle_pending_setting_input(message):
         return
     
-    question = message.text
-    bot.reply_to(message, "👁️ Đang chụp ảnh phân tích theo lệnh...")
-    
-    # 💥 HACK: Nếu đang bật Auto mà chủ nhấn lệnh chèn ngang, tạm Tắt luồng Auto 2s để "cướp" quyền Camera
-    was_auto = auto_mode_active
-    if was_auto:
-        auto_mode_active = False
-        time.sleep(1.5) # Chờ thread kia nhả camera
-        
-    camera = cv2.VideoCapture(0)
-    time.sleep(1) # Load sáng
-    success, img = camera.read()
-    camera.release()
-    
-    # Trả tài nguyên lại cho mạch tự động
-    if was_auto:
-        auto_mode_active = True
-        
-    if success:
-        cv2.imwrite("anh_telegram.jpg", img)
-        try:
-            answer = ask_ai("anh_telegram.jpg", question)
-            with open("anh_telegram.jpg", 'rb') as photo:
-                bot.send_photo(message.chat.id, photo, caption=f"🤖:\n\n{answer}")
-        except Exception as e:
-            bot.reply_to(message, f"❌ Lỗi Tín hiệu Não từ Google: {e}")
-    else:
-        bot.reply_to(message, "❌ Lỗi: Không thể khởi động Camera. Có rào cản từ hệ thống.")
+    capture_and_analyze_environment(message.chat.id, message.text, reply_to_message=message)
 
 if __name__ == "__main__":
     if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
