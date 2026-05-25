@@ -5,6 +5,10 @@
 *.jpg
 *.png
 *.jpeg
+*.mp4
+*.avi
+settings.json
+settings.json.tmp
 
 # Bỏ qua các file rác của thư viện Python
 __pycache__/
