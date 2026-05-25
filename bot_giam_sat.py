@@ -1,15 +1,19 @@
 import telebot
 import cv2
+import html
 import sys
 import os
 import json
 import logging
+import mimetypes
 import shutil
 import subprocess
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from PIL import Image
+from urllib.parse import parse_qs, quote, urlparse
 from google import genai
 from dotenv import load_dotenv
 
@@ -52,10 +56,19 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHIEC_CHIA_KHOA_ID_CUA_BAN = int(os.getenv("ALLOWED_USER_ID", 0))
 
+def env_int(name, default):
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 ALERT_HISTORY_FILE = os.path.join(LOG_DIR, "alert_history.json")
 ERROR_LOG_FILE = os.path.join(LOG_DIR, "bot_errors.log")
+DASHBOARD_HOST = "127.0.0.1"
+DASHBOARD_PORT = env_int("DASHBOARD_PORT", 8765)
+DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
 HISTORY_PREVIEW_LIMIT = 3
 HISTORY_LIMIT_CHOICES = (10, 50, 100)
 DEFAULT_SETTINGS = {
@@ -84,10 +97,11 @@ def setup_error_logging():
         backupCount=3,
         encoding="utf-8"
     )
+    handler.setLevel(logging.ERROR)
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 
     logger = logging.getLogger("vision_bot")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.ERROR)
     logger.addHandler(handler)
     logger.propagate = False
     return logger
@@ -307,7 +321,12 @@ def tail_error_log(max_lines=20):
         log_error("Khong doc duoc bot_errors.log", e)
         return f"Không đọc được log lỗi: {e}"
 
-    lines = [line.rstrip() for line in lines[-max_lines:]]
+    ignored_levels = (" [DEBUG] ", " [INFO] ", " [WARNING] ")
+    lines = [
+        line.rstrip()
+        for line in lines
+        if not any(level in line for level in ignored_levels)
+    ][-max_lines:]
     if not lines:
         return "Chưa có log lỗi nào."
     return "\n".join(lines)
@@ -315,6 +334,235 @@ def tail_error_log(max_lines=20):
 def format_error_log_message():
     log_text = tail_error_log().replace("```", "` ` `")
     return f"🧯 LOG LỖI GẦN NHẤT\n\n```text\n{log_text}\n```"
+
+def escape_html(value):
+    return html.escape(str(value), quote=True)
+
+def dashboard_media_url(path):
+    if not path:
+        return ""
+    return f"/media?path={quote(path)}"
+
+def render_dashboard_history(entries):
+    if not entries:
+        return '<section class="empty">Chưa có cảnh báo nào.</section>'
+
+    cards = []
+    for entry in entries:
+        timestamp = format_timestamp(entry.get("timestamp"))
+        analysis = text_preview(entry.get("analysis"), max_length=320)
+        video_status = entry.get("video_status") or "Không có video"
+        image_path = entry.get("image_path")
+        video_path = entry.get("video_path")
+
+        image_html = ""
+        if is_safe_alert_media_path(image_path) and os.path.exists(absolute_from_base(image_path)):
+            image_html = (
+                f'<a href="{dashboard_media_url(image_path)}" target="_blank">'
+                f'<img src="{dashboard_media_url(image_path)}" alt="Ảnh cảnh báo"></a>'
+            )
+
+        video_html = ""
+        if is_safe_alert_media_path(video_path) and os.path.exists(absolute_from_base(video_path)):
+            video_html = (
+                f'<video controls preload="metadata" src="{dashboard_media_url(video_path)}"></video>'
+            )
+
+        cards.append(
+            "<article class=\"history-card\">"
+            f"<div class=\"history-meta\"><strong>{escape_html(timestamp)}</strong>"
+            f"<span>{escape_html(video_status)}</span></div>"
+            f"<p>{escape_html(analysis)}</p>"
+            f"{image_html}{video_html}"
+            "</article>"
+        )
+    return "\n".join(cards)
+
+def render_dashboard_html():
+    settings_snapshot = get_settings_snapshot()
+    history_entries = get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
+    camera_ok, camera_status = get_camera_status_for_report()
+    radar_status = "BẬT" if auto_mode_active else "TẮT"
+    logs_size = format_size(get_directory_size(LOG_DIR))
+    uptime = format_duration(time.time() - BOT_START_TIME)
+    error_log = escape_html(tail_error_log())
+
+    settings_rows = "".join(
+        f"<tr><th>{escape_html(key)}</th><td>{escape_html(value)}</td></tr>"
+        for key, value in settings_snapshot.items()
+    )
+
+    camera_class = "ok" if camera_ok else "bad"
+    return f"""<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>Vision Bot Dashboard</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #647084;
+      --line: #d9e0ea;
+      --accent: #006d77;
+      --ok: #117a44;
+      --bad: #a32b2b;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        --bg: #121620;
+        --panel: #1b2230;
+        --text: #eef3fb;
+        --muted: #aab4c5;
+        --line: #303a4c;
+        --accent: #56b6c2;
+      }}
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }}
+    header {{
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }}
+    h1 {{ margin: 0 0 4px; font-size: 22px; }}
+    main {{ padding: 20px 24px 40px; max-width: 1220px; margin: 0 auto; }}
+    .muted {{ color: var(--muted); }}
+    .grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
+    .card, .history-card, .panel {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }}
+    .card span {{ display: block; color: var(--muted); font-size: 12px; }}
+    .card strong {{ font-size: 18px; }}
+    .ok {{ color: var(--ok); }}
+    .bad {{ color: var(--bad); }}
+    .layout {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }}
+    h2 {{ font-size: 16px; margin: 0 0 10px; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th, td {{ text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }}
+    th {{ color: var(--muted); width: 45%; font-weight: 600; }}
+    .history {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }}
+    .history-meta {{ display: flex; justify-content: space-between; gap: 12px; color: var(--muted); margin-bottom: 8px; }}
+    .history-card img, .history-card video {{ width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; border: 1px solid var(--line); background: #000; margin-top: 8px; }}
+    pre {{ white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; color: var(--muted); }}
+    .empty {{ padding: 20px; color: var(--muted); }}
+    @media (max-width: 860px) {{
+      .grid, .layout, .history {{ grid-template-columns: 1fr; }}
+      header, main {{ padding-left: 14px; padding-right: 14px; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Vision Bot Dashboard</h1>
+    <div class="muted">Chỉ mở trên máy tính này: {escape_html(DASHBOARD_URL)} · Tự refresh mỗi 30 giây</div>
+  </header>
+  <main>
+    <section class="grid">
+      <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
+      <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_status)}</strong></div>
+      <div class="card"><span>Lịch sử</span><strong>{len(history_entries)}/{settings_snapshot["alert_history_limit"]}</strong></div>
+      <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Trạng thái</h2>
+        <table>
+          <tr><th>Uptime</th><td>{escape_html(uptime)}</td></tr>
+          <tr><th>Cảnh báo gần nhất</th><td>{escape_html(format_timestamp(last_alert_timestamp))}</td></tr>
+          <tr><th>Dashboard local</th><td>{escape_html(DASHBOARD_URL)}</td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>Setting</h2>
+        <table>{settings_rows}</table>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Log lỗi gần nhất</h2>
+      <pre>{error_log}</pre>
+    </section>
+
+    <h2 style="margin-top:20px">Lịch sử cảnh báo</h2>
+    <section class="history">{render_dashboard_history(history_entries)}</section>
+  </main>
+</body>
+</html>"""
+
+def serve_dashboard_media(handler, query):
+    media_path = query.get("path", [""])[0]
+    if not is_safe_alert_media_path(media_path):
+        handler.send_error(403)
+        return
+
+    absolute_path = os.path.abspath(absolute_from_base(media_path))
+    if not os.path.isfile(absolute_path):
+        handler.send_error(404)
+        return
+
+    try:
+        content_length = os.path.getsize(absolute_path)
+        content_type = mimetypes.guess_type(absolute_path)[0] or "application/octet-stream"
+        handler.send_response(200)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Content-Length", str(content_length))
+        handler.send_header("Cache-Control", "no-store")
+        handler.end_headers()
+        with open(absolute_path, "rb") as file:
+            shutil.copyfileobj(file, handler.wfile)
+    except OSError as e:
+        log_error(f"Khong doc duoc media dashboard: {absolute_path}", e)
+        handler.send_error(404)
+
+class DashboardRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed_url = urlparse(self.path)
+        if parsed_url.path in ("/", "/index.html"):
+            body = render_dashboard_html().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed_url.path == "/media":
+            serve_dashboard_media(self, parse_qs(parsed_url.query))
+            return
+
+        self.send_error(404)
+
+    def log_message(self, format, *args):
+        return
+
+def start_dashboard_server():
+    try:
+        server = ThreadingHTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardRequestHandler)
+    except OSError as e:
+        log_error(f"Khong khoi dong duoc dashboard local tai {DASHBOARD_URL}", e)
+        return
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"Dashboard local dang chay tai {DASHBOARD_URL}")
 
 def add_alert_history(entry):
     with history_lock:
@@ -329,6 +577,13 @@ def add_alert_history(entry):
 def get_recent_alert_history(limit=HISTORY_PREVIEW_LIMIT):
     with history_lock:
         return load_alert_history_unlocked()[:limit]
+
+def get_alert_history_snapshot(limit=None):
+    with history_lock:
+        history = load_alert_history_unlocked()
+    if limit is None:
+        return history
+    return history[:limit]
 
 def get_alert_history_count():
     with history_lock:
@@ -768,6 +1023,7 @@ def format_status_message():
         f"🧾 Cảnh báo trong lịch sử: {alert_count}/{settings_snapshot['alert_history_limit']}\n"
         f"💾 Dung lượng logs: {logs_size}\n"
         f"⏳ Uptime: {uptime}\n"
+        f"🌐 Dashboard local: {DASHBOARD_URL}\n"
         f"⚙️ Setting: {format_settings_snapshot(settings_snapshot)}"
     )
 
@@ -782,6 +1038,7 @@ def send_startup_notification():
             CHIEC_CHIA_KHOA_ID_CUA_BAN,
             "✅ Vision Bot đã online.\n"
             f"🕒 Khởi động lúc: {started_at}\n"
+            f"🌐 Dashboard local: {DASHBOARD_URL}\n"
             "Gõ /menu để mở bảng điều khiển."
         )
     except Exception as e:
@@ -1303,5 +1560,6 @@ if __name__ == "__main__":
         print("❌ LỖI: Token vắng mặt")
     else:
         print("🚀 Khởi chạy hệ điều hành BOT GIÁM SÁT KÉP (Nhận lệnh liên tục!).")
+        start_dashboard_server()
         send_startup_notification()
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
