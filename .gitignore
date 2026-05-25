@@ -9,6 +9,7 @@
 *.avi
 settings.json
 settings.json.tmp
+logs/
 
 # Bỏ qua các file rác của thư viện Python
 __pycache__/

@@ -12,14 +12,20 @@ from dotenv import load_dotenv
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # --- BẢO MẬT: Load thông tin bí mật từ file .env ---
-load_dotenv()
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHIEC_CHIA_KHOA_ID_CUA_BAN = int(os.getenv("ALLOWED_USER_ID", 0))
 
-SETTINGS_FILE = "settings.json"
+SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+ALERT_HISTORY_FILE = os.path.join(LOG_DIR, "alert_history.json")
+ALERT_HISTORY_LIMIT = 50
+HISTORY_PREVIEW_LIMIT = 3
 DEFAULT_SETTINGS = {
     "motion_area_threshold": 8000,
     "alert_cooldown_seconds": 10,
@@ -59,6 +65,7 @@ last_alert_timestamp = None
 settings_lock = threading.Lock()
 pending_setting_inputs = {}
 pending_setting_lock = threading.Lock()
+history_lock = threading.Lock()
 
 SETTING_LABELS = {
     "motion_area_threshold": "độ nhạy chuyển động",
@@ -144,6 +151,98 @@ def update_setting(name, value):
     with settings_lock:
         settings[name] = value
         save_settings(settings.copy())
+
+def ensure_log_dir():
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+def make_alert_id(timestamp):
+    time_part = time.strftime("%Y%m%d_%H%M%S", time.localtime(timestamp))
+    millis = int((timestamp - int(timestamp)) * 1000)
+    return f"{time_part}_{millis:03d}"
+
+def relative_to_base(path):
+    return os.path.relpath(path, BASE_DIR)
+
+def absolute_from_base(path):
+    if not path:
+        return None
+    if os.path.isabs(path):
+        return path
+    return os.path.join(BASE_DIR, path)
+
+def load_alert_history_unlocked():
+    try:
+        with open(ALERT_HISTORY_FILE, "r", encoding="utf-8") as file:
+            history = json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(history, list):
+        return []
+    return [entry for entry in history if isinstance(entry, dict)]
+
+def save_alert_history_unlocked(history):
+    ensure_log_dir()
+    temp_file = f"{ALERT_HISTORY_FILE}.tmp"
+    with open(temp_file, "w", encoding="utf-8") as file:
+        json.dump(history, file, ensure_ascii=False, indent=2)
+    os.replace(temp_file, ALERT_HISTORY_FILE)
+
+def add_alert_history(entry):
+    with history_lock:
+        history = load_alert_history_unlocked()
+        history.insert(0, entry)
+        save_alert_history_unlocked(history[:ALERT_HISTORY_LIMIT])
+
+def get_recent_alert_history(limit=HISTORY_PREVIEW_LIMIT):
+    with history_lock:
+        return load_alert_history_unlocked()[:limit]
+
+def text_preview(text, max_length=140):
+    if not text:
+        return "Không có phân tích"
+    compact = " ".join(str(text).split())
+    if len(compact) <= max_length:
+        return compact
+    return f"{compact[:max_length - 3]}..."
+
+def format_alert_history_message(entries):
+    if not entries:
+        return "🧾 LỊCH SỬ CẢNH BÁO\n\nChưa có cảnh báo nào được ghi lại."
+
+    lines = ["🧾 LỊCH SỬ CẢNH BÁO GẦN NHẤT"]
+    for index, entry in enumerate(entries, start=1):
+        timestamp = entry.get("timestamp")
+        video_status = entry.get("video_status") or "Không có video"
+        analysis = text_preview(entry.get("analysis"))
+        lines.append(
+            f"\n{index}. {format_timestamp(timestamp)}\n"
+            f"Video: {video_status}\n"
+            f"Gemini: {analysis}"
+        )
+    return "\n".join(lines)
+
+def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
+    entries = get_recent_alert_history(limit)
+    bot.send_message(chat_id, format_alert_history_message(entries))
+
+    for index, entry in enumerate(entries, start=1):
+        timestamp = format_timestamp(entry.get("timestamp"))
+        image_path = absolute_from_base(entry.get("image_path"))
+        video_path = absolute_from_base(entry.get("video_path"))
+
+        if image_path and os.path.exists(image_path):
+            try:
+                with open(image_path, "rb") as photo:
+                    bot.send_photo(chat_id, photo, caption=f"📸 Cảnh báo #{index} - {timestamp}")
+            except Exception:
+                pass
+
+        if video_path and os.path.exists(video_path):
+            try:
+                with open(video_path, "rb") as video:
+                    bot.send_video(chat_id, video, caption=f"🎥 Video cảnh báo #{index}")
+            except Exception:
+                pass
 
 def on_off_label(value):
     return "BẬT" if value else "TẮT"
@@ -272,6 +371,9 @@ def build_main_menu():
     )
     keyboard.add(
         telebot.types.InlineKeyboardButton("📡 Trạng thái", callback_data="menu:status"),
+        telebot.types.InlineKeyboardButton("🧾 Lịch sử", callback_data="menu:history")
+    )
+    keyboard.add(
         telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings")
     )
     return keyboard
@@ -474,11 +576,17 @@ def motion_detection_loop():
             if co_chuyen_dong:
                 last_alert_time = time.time() # Cập nhật lại mốc thời gian vừa báo động
                 last_alert_timestamp = last_alert_time
-                cv2.imwrite("canh_bao.jpg", img)
+                alert_id = make_alert_id(last_alert_time)
+                ensure_log_dir()
+                image_path = os.path.join(LOG_DIR, f"alert_{alert_id}.jpg")
+                video_path = None
+                video_status = "Không ghi video"
+                analysis = "Gemini đang tắt"
+                cv2.imwrite(image_path, img)
                 bot.send_message(monitoring_chat_id, "🚨 BÁO ĐỘNG KÍCH HOẠT: Phát hiện có sự dịch chuyển lớn trong phòng!")
 
                 if get_setting("send_video"):
-                    video_path = "canh_bao.mp4"
+                    video_path = os.path.join(LOG_DIR, f"alert_{alert_id}.mp4")
                     video_seconds = get_setting("alert_video_seconds")
                     video_fps = get_setting("alert_video_fps")
                     video_ready, video_status = record_alert_video(
@@ -500,25 +608,39 @@ def motion_detection_loop():
                             bot.send_message(monitoring_chat_id, f"⚠️ Đã ghi video nhưng gửi Telegram thất bại: {e}")
                     else:
                         bot.send_message(monitoring_chat_id, f"⚠️ Không ghi được video cảnh báo: {video_status}")
+                        video_path = None
+                else:
+                    video_status = "Đã tắt gửi video trong setting"
 
                 if get_setting("use_gemini_analysis"):
                     try:
                         # Chuyển ngay lệnh Tự suy luận cho Gemini phân tích
-                        ans = ask_ai("canh_bao.jpg", "Báo động có sự chuyển động. Đó là con người hay một con vật? Bọn họ đang định làm gì?")
-                        with open("canh_bao.jpg", 'rb') as photo:
-                            bot.send_photo(monitoring_chat_id, photo, caption=f"🧠 Phân tích hiện trường:\n\n{ans}")
+                        analysis = ask_ai(image_path, "Báo động có sự chuyển động. Đó là con người hay một con vật? Bọn họ đang định làm gì?")
+                        with open(image_path, 'rb') as photo:
+                            bot.send_photo(monitoring_chat_id, photo, caption=f"🧠 Phân tích hiện trường:\n\n{analysis}")
                     except Exception as e:
+                        analysis = f"Gemini lỗi: {e}"
                         try:
-                            with open("canh_bao.jpg", 'rb') as photo:
+                            with open(image_path, 'rb') as photo:
                                 bot.send_photo(monitoring_chat_id, photo, caption=f"📸 Ảnh cảnh báo\n⚠️ Gemini lỗi: {e}")
                         except Exception:
                             pass
                 else:
                     try:
-                        with open("canh_bao.jpg", 'rb') as photo:
+                        with open(image_path, 'rb') as photo:
                             bot.send_photo(monitoring_chat_id, photo, caption="📸 Ảnh cảnh báo")
                     except Exception:
                         pass
+
+                add_alert_history({
+                    "id": alert_id,
+                    "timestamp": last_alert_time,
+                    "image_path": relative_to_base(image_path),
+                    "video_path": relative_to_base(video_path) if video_path else None,
+                    "video_status": video_status,
+                    "analysis": analysis,
+                    "settings": get_settings_snapshot()
+                })
                 
                 last_gray_frame = gray
                 continue
@@ -565,7 +687,7 @@ def send_welcome(message):
                           "👉 Gõ lệnh `/auto` : BẬT Lưới Laser Tự động báo động.\n"
                           "👉 Gõ lệnh `/stop` : TẮT báo động, nhường đường lại cho tự nhiên.\n"
                           "👉 Gõ lệnh `/status` : Kiểm tra bot, radar, camera và cảnh báo gần nhất.\n"
-                          "👉 Trong `/menu`, chọn Cài đặt để chỉnh độ nhạy, cooldown, video và Gemini.\n"
+                          "👉 Trong `/menu`, chọn Cài đặt hoặc Lịch sử để quản lý bot.\n"
                           "👉 Hoặc просто Nhắn bất cứ gì (Tôi sẽ tự chụp 1 tấm để giải tỏa thắc mắc).")
 
 @bot.message_handler(commands=['menu'])
@@ -596,6 +718,12 @@ def send_status(message):
     if not verify_user(message): return
     clear_pending_setting_input(message)
     bot.reply_to(message, format_status_message())
+
+@bot.message_handler(commands=['history'])
+def send_history(message):
+    if not verify_user(message): return
+    clear_pending_setting_input(message)
+    send_alert_history(message.chat.id)
 
 @bot.message_handler(commands=['settings'])
 def send_settings(message):
@@ -691,6 +819,12 @@ def handle_menu_callback(call):
     if call.data == "menu:status":
         bot.answer_callback_query(call.id)
         edit_menu_message(call, format_status_message(), build_main_menu())
+        return
+
+    if call.data == "menu:history":
+        bot.answer_callback_query(call.id, "Đang gửi lịch sử")
+        edit_menu_message(call, "🧾 Đang gửi lịch sử cảnh báo gần nhất...", build_main_menu())
+        send_alert_history(call.message.chat.id)
         return
 
     if call.data == "menu:settings":
