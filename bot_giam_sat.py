@@ -518,6 +518,99 @@ def render_dashboard_history(entries, active_filter="all"):
         )
     return "\n".join(cards)
 
+def selected_attr(current_value, option_value):
+    return " selected" if current_value == option_value else ""
+
+def render_dashboard_settings_form(settings_snapshot):
+    numeric_fields = (
+        "motion_area_threshold",
+        "alert_cooldown_seconds",
+        "alert_video_seconds",
+        "alert_video_fps"
+    )
+    rows = []
+    for field in numeric_fields:
+        min_value, max_value = SETTING_LIMITS[field]
+        rows.append(
+            "<tr>"
+            f"<th><label for=\"setting_{field}\">{escape_html(SETTING_LABELS[field])}</label></th>"
+            "<td>"
+            f"<input id=\"setting_{field}\" name=\"{field}\" type=\"number\" "
+            f"value=\"{settings_snapshot[field]}\" min=\"{min_value}\" max=\"{max_value}\" step=\"1\">"
+            f"<span class=\"setting-hint\">{min_value}-{max_value}{escape_html(SETTING_UNITS[field])}</span>"
+            "</td>"
+            "</tr>"
+        )
+
+    history_options = "".join(
+        f'<option value="{choice}"{selected_attr(settings_snapshot["alert_history_limit"], choice)}>{choice} cảnh báo</option>'
+        for choice in HISTORY_LIMIT_CHOICES
+    )
+    rows.append(
+        "<tr>"
+        f"<th><label for=\"setting_alert_history_limit\">{escape_html(SETTING_LABELS['alert_history_limit'])}</label></th>"
+        "<td>"
+        f"<select id=\"setting_alert_history_limit\" name=\"alert_history_limit\">{history_options}</select>"
+        "<span class=\"setting-hint\">Khi giảm số lượng, bot xóa record cũ và media tương ứng.</span>"
+        "</td>"
+        "</tr>"
+    )
+
+    for field, label in (
+        ("send_video", "Gửi video cảnh báo"),
+        ("use_gemini_analysis", "Phân tích Gemini")
+    ):
+        rows.append(
+            "<tr>"
+            f"<th><label for=\"setting_{field}\">{escape_html(label)}</label></th>"
+            "<td>"
+            f"<select id=\"setting_{field}\" name=\"{field}\">"
+            f"<option value=\"true\"{selected_attr(settings_snapshot[field], True)}>BẬT</option>"
+            f"<option value=\"false\"{selected_attr(settings_snapshot[field], False)}>TẮT</option>"
+            "</select>"
+            "</td>"
+            "</tr>"
+        )
+
+    return (
+        '<form class="settings-form" method="post" action="/update-settings">'
+        f"<table>{''.join(rows)}</table>"
+        '<button class="save-button" type="submit">Lưu setting</button>'
+        '<p class="setting-note">Setting được lưu vào settings.json và vẫn còn sau khi restart bot.</p>'
+        "</form>"
+    )
+
+def bool_from_dashboard(value, default):
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("true", "1", "yes", "on", "bat", "bật")
+
+def update_dashboard_settings(form):
+    updates = {}
+    current = get_settings_snapshot()
+
+    for field, (min_value, max_value) in SETTING_LIMITS.items():
+        raw_value = form.get(field, [current[field]])[0]
+        value = clamp_int(raw_value, current[field], min_value, max_value)
+        if field == "alert_history_limit" and value not in HISTORY_LIMIT_CHOICES:
+            value = min(HISTORY_LIMIT_CHOICES, key=lambda choice: abs(choice - value))
+        updates[field] = value
+
+    updates["send_video"] = bool_from_dashboard(
+        form.get("send_video", [current["send_video"]])[0],
+        current["send_video"]
+    )
+    updates["use_gemini_analysis"] = bool_from_dashboard(
+        form.get("use_gemini_analysis", [current["use_gemini_analysis"]])[0],
+        current["use_gemini_analysis"]
+    )
+
+    for field, value in updates.items():
+        update_setting(field, value)
+
+    if updates["alert_history_limit"] != current["alert_history_limit"]:
+        trim_alert_history(updates["alert_history_limit"])
+
 def render_dashboard_html(notice="", history_filter="all", active_tab="status"):
     active_tab = normalize_dashboard_tab(active_tab)
     history_filter = normalize_dashboard_history_filter(history_filter)
@@ -535,10 +628,7 @@ def render_dashboard_html(notice="", history_filter="all", active_tab="status"):
     uptime = format_duration(time.time() - BOT_START_TIME)
     error_log = escape_html(tail_error_log())
 
-    settings_rows = "".join(
-        f"<tr><th>{escape_html(key)}</th><td>{escape_html(value)}</td></tr>"
-        for key, value in settings_snapshot.items()
-    )
+    settings_form = render_dashboard_settings_form(settings_snapshot)
 
     notice_html = ""
     if notice:
@@ -571,7 +661,7 @@ def render_dashboard_html(notice="", history_filter="all", active_tab="status"):
     settings_content = f"""
     <section class="panel tab-panel">
       <h2>Setting</h2>
-      <table>{settings_rows}</table>
+      {settings_form}
     </section>"""
     errors_content = f"""
     <section class="panel tab-panel">
@@ -660,6 +750,10 @@ def render_dashboard_html(notice="", history_filter="all", active_tab="status"):
     .filter-link {{ border: 1px solid var(--line); border-radius: 999px; color: var(--text); padding: 6px 10px; text-decoration: none; }}
     .filter-link.active {{ background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }}
     .filter-count {{ color: var(--muted); }}
+    .settings-form input, .settings-form select {{ width: min(260px, 100%); padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); font: inherit; }}
+    .setting-hint {{ display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }}
+    .setting-note {{ color: var(--muted); margin: 12px 0 0; }}
+    .save-button {{ margin-top: 12px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 9px 13px; }}
     .delete-form {{ margin: 0; }}
     .delete-button {{ border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--bad); cursor: pointer; font: inherit; font-weight: 700; padding: 5px 9px; }}
     .delete-button:hover {{ border-color: var(--bad); }}
@@ -794,6 +888,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 notice = "Đã xóa cảnh báo."
             elif query.get("deleted") == ["0"]:
                 notice = "Không tìm thấy cảnh báo để xóa."
+            elif query.get("saved") == ["1"]:
+                notice = "Đã lưu setting."
 
             body = render_dashboard_html(notice, history_filter, active_tab).encode("utf-8")
             self.send_response(200)
@@ -812,10 +908,6 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed_url = urlparse(self.path)
-        if parsed_url.path != "/delete-alert":
-            self.send_error(404)
-            return
-
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -823,6 +915,16 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
         body = self.rfile.read(min(content_length, 4096)).decode("utf-8", errors="replace")
         form = parse_qs(body)
+
+        if parsed_url.path == "/update-settings":
+            update_dashboard_settings(form)
+            redirect_dashboard(self, "/?" + urlencode({"tab": "settings", "saved": "1"}))
+            return
+
+        if parsed_url.path != "/delete-alert":
+            self.send_error(404)
+            return
+
         alert_id = form.get("id", [""])[0]
         history_filter = normalize_dashboard_history_filter(form.get("filter", ["all"])[0])
         deleted = delete_alert_history_entry(alert_id)
