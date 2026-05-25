@@ -42,6 +42,7 @@ def ensure_single_instance():
         sys.exit(0)
 
 ensure_single_instance()
+BOT_START_TIME = time.time()
 
 # --- BẢO MẬT: Load thông tin bí mật từ file .env ---
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -261,6 +262,10 @@ def add_alert_history(entry):
 def get_recent_alert_history(limit=HISTORY_PREVIEW_LIMIT):
     with history_lock:
         return load_alert_history_unlocked()[:limit]
+
+def get_alert_history_count():
+    with history_lock:
+        return len(load_alert_history_unlocked())
 
 def trim_alert_history(limit):
     with history_lock:
@@ -612,18 +617,76 @@ def get_camera_status_for_report():
         return camera_online, last_camera_status
     return check_camera_once()
 
+def format_duration(seconds):
+    seconds = max(0, int(seconds))
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days} ngày")
+    if hours:
+        parts.append(f"{hours} giờ")
+    if minutes:
+        parts.append(f"{minutes} phút")
+    if seconds or not parts:
+        parts.append(f"{seconds} giây")
+    return " ".join(parts)
+
+def get_directory_size(path):
+    total_size = 0
+    if not os.path.isdir(path):
+        return 0
+
+    for root, _, files in os.walk(path):
+        for filename in files:
+            file_path = os.path.join(root, filename)
+            try:
+                total_size += os.path.getsize(file_path)
+            except OSError as e:
+                log_error(f"Khong doc duoc dung luong file log: {file_path}", e)
+    return total_size
+
+def format_size(num_bytes):
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+
+def format_settings_snapshot(settings_snapshot):
+    return (
+        f"Độ nhạy {settings_snapshot['motion_area_threshold']} | "
+        f"Cooldown {settings_snapshot['alert_cooldown_seconds']}s | "
+        f"Video {settings_snapshot['alert_video_seconds']}s/{settings_snapshot['alert_video_fps']}fps | "
+        f"Gửi video {on_off_label(settings_snapshot['send_video'])} | "
+        f"Gemini {on_off_label(settings_snapshot['use_gemini_analysis'])} | "
+        f"Giữ lịch sử {settings_snapshot['alert_history_limit']}"
+    )
+
 def format_status_message():
     camera_ok, camera_status = get_camera_status_for_report()
     radar_status = "BẬT" if auto_mode_active else "TẮT"
     camera_icon = "✅" if camera_ok else "❌"
     alert_time = format_timestamp(last_alert_timestamp)
+    uptime = format_duration(time.time() - BOT_START_TIME)
+    alert_count = get_alert_history_count()
+    logs_size = format_size(get_directory_size(LOG_DIR))
+    settings_snapshot = get_settings_snapshot()
 
     return (
         "📡 TRẠNG THÁI VISION BOT\n\n"
         "✅ Bot: Đang chạy và nhận lệnh Telegram\n"
         f"📍 Radar: {radar_status}\n"
         f"{camera_icon} Camera: {camera_status}\n"
-        f"🚨 Lần cảnh báo gần nhất: {alert_time}"
+        f"🚨 Lần cảnh báo gần nhất: {alert_time}\n"
+        f"🧾 Cảnh báo trong lịch sử: {alert_count}/{settings_snapshot['alert_history_limit']}\n"
+        f"💾 Dung lượng logs: {logs_size}\n"
+        f"⏳ Uptime: {uptime}\n"
+        f"⚙️ Setting: {format_settings_snapshot(settings_snapshot)}"
     )
 
 def record_alert_video(camera_stream, first_frame, video_path, duration_seconds, fps):
