@@ -3,9 +3,11 @@ import cv2
 import sys
 import os
 import json
+import logging
 import shutil
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 from PIL import Image
 from google import genai
 from dotenv import load_dotenv
@@ -51,6 +53,7 @@ CHIEC_CHIA_KHOA_ID_CUA_BAN = int(os.getenv("ALLOWED_USER_ID", 0))
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 ALERT_HISTORY_FILE = os.path.join(LOG_DIR, "alert_history.json")
+ERROR_LOG_FILE = os.path.join(LOG_DIR, "bot_errors.log")
 HISTORY_PREVIEW_LIMIT = 3
 HISTORY_LIMIT_CHOICES = (10, 50, 100)
 DEFAULT_SETTINGS = {
@@ -70,6 +73,30 @@ SETTING_LIMITS = {
     "alert_video_fps": (5, 30),
     "alert_history_limit": (10, 100)
 }
+
+def setup_error_logging():
+    os.makedirs(LOG_DIR, exist_ok=True)
+    handler = RotatingFileHandler(
+        ERROR_LOG_FILE,
+        maxBytes=1_000_000,
+        backupCount=3,
+        encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+    logger = logging.getLogger("vision_bot")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+error_logger = setup_error_logging()
+
+def log_error(context, error=None):
+    if error is None:
+        error_logger.error(context)
+    else:
+        error_logger.exception("%s: %s", context, error)
 
 # Khởi tạo kết nối
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
@@ -247,9 +274,19 @@ def clear_alert_history_files():
         raise RuntimeError("Duong dan logs khong hop le, da huy thao tac xoa.")
 
     with history_lock:
-        if os.path.isdir(log_dir):
-            shutil.rmtree(log_dir)
         ensure_log_dir()
+        for name in os.listdir(log_dir):
+            path = os.path.join(log_dir, name)
+            should_delete = (
+                name.startswith("alert_")
+                or name in ("alert_history.json", "alert_history.json.tmp")
+            )
+            if not should_delete:
+                continue
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
         save_alert_history_unlocked([])
 
 def text_preview(text, max_length=140):
@@ -278,7 +315,11 @@ def format_alert_history_message(entries):
 
 def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
     entries = get_recent_alert_history(limit)
-    bot.send_message(chat_id, format_alert_history_message(entries))
+    try:
+        bot.send_message(chat_id, format_alert_history_message(entries))
+    except Exception as e:
+        log_error("Khong gui duoc summary lich su canh bao", e)
+        return
 
     for index, entry in enumerate(entries, start=1):
         timestamp = format_timestamp(entry.get("timestamp"))
@@ -289,15 +330,15 @@ def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
             try:
                 with open(image_path, "rb") as photo:
                     bot.send_photo(chat_id, photo, caption=f"📸 Cảnh báo #{index} - {timestamp}")
-            except Exception:
-                pass
+            except Exception as e:
+                log_error(f"Khong gui duoc anh lich su #{index}", e)
 
         if video_path and os.path.exists(video_path):
             try:
                 with open(video_path, "rb") as video:
                     bot.send_video(chat_id, video, caption=f"🎥 Video cảnh báo #{index}")
-            except Exception:
-                pass
+            except Exception as e:
+                log_error(f"Khong gui duoc video lich su #{index}", e)
 
 def on_off_label(value):
     return "BẬT" if value else "TẮT"
@@ -485,7 +526,8 @@ def edit_menu_message(call, text, reply_markup=None):
             call.message.message_id,
             reply_markup=reply_markup
         )
-    except Exception:
+    except Exception as e:
+        log_error("Khong edit duoc menu message, fallback sang send_message", e)
         bot.send_message(call.message.chat.id, text, reply_markup=reply_markup)
 
 def ask_ai(image_path, user_question):
@@ -524,6 +566,7 @@ def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
 
     if not success:
         error_message = "❌ Lỗi: Không thể khởi động Camera. Có rào cản từ hệ thống."
+        log_error("Khong the chup anh theo yeu cau: camera khong doc duoc frame")
         if reply_to_message is None:
             bot.send_message(chat_id, error_message)
         else:
@@ -537,10 +580,14 @@ def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
         answer = ask_ai(image_path, question)
         caption = f"🤖:\n\n{answer}"
     except Exception as e:
+        log_error("Gemini loi khi chup anh theo yeu cau", e)
         caption = f"📸 Ảnh đã chụp\n⚠️ Lỗi Tín hiệu Não từ Google: {e}"
 
-    with open(image_path, 'rb') as photo:
-        bot.send_photo(chat_id, photo, caption=caption)
+    try:
+        with open(image_path, 'rb') as photo:
+            bot.send_photo(chat_id, photo, caption=caption)
+    except Exception as e:
+        log_error("Khong gui duoc anh chup theo yeu cau", e)
 
 def format_timestamp(timestamp):
     if timestamp is None:
@@ -628,6 +675,7 @@ def motion_detection_loop():
     global camera_online, last_camera_status, last_alert_timestamp
     camera_stream = None
     last_alert_time = 0 # Lưu thời điểm cảnh báo cuối cùng
+    last_camera_error_log_time = 0
     
     while True:
         try:
@@ -649,6 +697,9 @@ def motion_detection_loop():
                 if not camera_stream.isOpened():
                     camera_online = False
                     last_camera_status = "Radar bật nhưng không mở được camera"
+                    if time.time() - last_camera_error_log_time > 60:
+                        log_error(last_camera_status)
+                        last_camera_error_log_time = time.time()
                     camera_stream.release()
                     camera_stream = None
                     time.sleep(2)
@@ -661,6 +712,9 @@ def motion_detection_loop():
             if not success:
                 camera_online = False
                 last_camera_status = "Radar bật nhưng không đọc được ảnh từ camera"
+                if time.time() - last_camera_error_log_time > 60:
+                    log_error(last_camera_status)
+                    last_camera_error_log_time = time.time()
                 time.sleep(0.5)
                 continue
             camera_online = True
@@ -728,6 +782,7 @@ def motion_detection_loop():
                                     caption=f"🎥 Clip cảnh báo {video_seconds} giây\n{video_status}"
                                 )
                         except Exception as e:
+                            log_error("Da ghi video canh bao nhung gui Telegram that bai", e)
                             bot.send_message(monitoring_chat_id, f"⚠️ Đã ghi video nhưng gửi Telegram thất bại: {e}")
                     else:
                         bot.send_message(monitoring_chat_id, f"⚠️ Không ghi được video cảnh báo: {video_status}")
@@ -742,18 +797,19 @@ def motion_detection_loop():
                         with open(image_path, 'rb') as photo:
                             bot.send_photo(monitoring_chat_id, photo, caption=f"🧠 Phân tích hiện trường:\n\n{analysis}")
                     except Exception as e:
+                        log_error("Gemini loi khi phan tich canh bao", e)
                         analysis = f"Gemini lỗi: {e}"
                         try:
                             with open(image_path, 'rb') as photo:
                                 bot.send_photo(monitoring_chat_id, photo, caption=f"📸 Ảnh cảnh báo\n⚠️ Gemini lỗi: {e}")
-                        except Exception:
-                            pass
+                        except Exception as send_error:
+                            log_error("Khong gui duoc anh canh bao sau khi Gemini loi", send_error)
                 else:
                     try:
                         with open(image_path, 'rb') as photo:
                             bot.send_photo(monitoring_chat_id, photo, caption="📸 Ảnh cảnh báo")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_error("Khong gui duoc anh canh bao khi tat Gemini", e)
 
                 add_alert_history({
                     "id": alert_id,
@@ -772,6 +828,7 @@ def motion_detection_loop():
             # Quét siêu nhanh để camera cập nhật đúng thời gian thực
             time.sleep(0.1)
         except Exception as e:
+            log_error("Loi trong vong lap motion_detection_loop", e)
             time.sleep(5)
 
 # Bật luồng chạy ngầm đa nhiệm (Luôn song hành với Telegram)
@@ -972,6 +1029,7 @@ def handle_menu_callback(call):
         try:
             clear_alert_history_files()
         except Exception as e:
+            log_error("Don lich su canh bao that bai", e)
             bot.answer_callback_query(call.id, "Xóa lịch sử thất bại", show_alert=True)
             edit_menu_message(call, f"❌ Không thể dọn lịch sử: {e}", build_main_menu())
             return
