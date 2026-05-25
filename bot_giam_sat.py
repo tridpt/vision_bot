@@ -253,11 +253,61 @@ def save_alert_history_unlocked(history):
         json.dump(history, file, ensure_ascii=False, indent=2)
     os.replace(temp_file, ALERT_HISTORY_FILE)
 
+def is_safe_alert_media_path(path):
+    if not path:
+        return False
+    log_dir = os.path.abspath(LOG_DIR)
+    absolute_path = os.path.abspath(absolute_from_base(path))
+    if os.path.commonpath([log_dir, absolute_path]) != log_dir:
+        return False
+    return os.path.basename(absolute_path).startswith("alert_")
+
+def delete_alert_media_file(path):
+    if not is_safe_alert_media_path(path):
+        return
+    absolute_path = os.path.abspath(absolute_from_base(path))
+    try:
+        if os.path.isfile(absolute_path):
+            os.remove(absolute_path)
+    except OSError as e:
+        log_error(f"Khong xoa duoc file canh bao cu: {absolute_path}", e)
+
+def delete_alert_media_for_entries(entries):
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        delete_alert_media_file(entry.get("image_path"))
+        delete_alert_media_file(entry.get("video_path"))
+
+def tail_error_log(max_lines=20):
+    if not os.path.exists(ERROR_LOG_FILE):
+        return "Chưa có log lỗi nào."
+
+    try:
+        with open(ERROR_LOG_FILE, "r", encoding="utf-8") as file:
+            lines = file.readlines()
+    except OSError as e:
+        log_error("Khong doc duoc bot_errors.log", e)
+        return f"Không đọc được log lỗi: {e}"
+
+    lines = [line.rstrip() for line in lines[-max_lines:]]
+    if not lines:
+        return "Chưa có log lỗi nào."
+    return "\n".join(lines)
+
+def format_error_log_message():
+    log_text = tail_error_log().replace("```", "` ` `")
+    return f"🧯 LOG LỖI GẦN NHẤT\n\n```text\n{log_text}\n```"
+
 def add_alert_history(entry):
     with history_lock:
         history = load_alert_history_unlocked()
         history.insert(0, entry)
-        save_alert_history_unlocked(history[:get_setting("alert_history_limit")])
+        limit = get_setting("alert_history_limit")
+        kept_history = history[:limit]
+        removed_history = history[limit:]
+        save_alert_history_unlocked(kept_history)
+        delete_alert_media_for_entries(removed_history)
 
 def get_recent_alert_history(limit=HISTORY_PREVIEW_LIMIT):
     with history_lock:
@@ -270,7 +320,10 @@ def get_alert_history_count():
 def trim_alert_history(limit):
     with history_lock:
         history = load_alert_history_unlocked()
-        save_alert_history_unlocked(history[:limit])
+        kept_history = history[:limit]
+        removed_history = history[limit:]
+        save_alert_history_unlocked(kept_history)
+        delete_alert_media_for_entries(removed_history)
 
 def clear_alert_history_files():
     log_dir = os.path.abspath(LOG_DIR)
@@ -481,7 +534,10 @@ def build_main_menu():
         telebot.types.InlineKeyboardButton("🧾 Lịch sử", callback_data="menu:history")
     )
     keyboard.add(
-        telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings"),
+        telebot.types.InlineKeyboardButton("🧯 Xem log lỗi", callback_data="menu:error_log"),
+        telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings")
+    )
+    keyboard.add(
         telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm")
     )
     return keyboard
@@ -1077,6 +1133,11 @@ def handle_menu_callback(call):
         bot.answer_callback_query(call.id, "Đang gửi lịch sử")
         edit_menu_message(call, "🧾 Đang gửi lịch sử cảnh báo gần nhất...", build_main_menu())
         send_alert_history(call.message.chat.id)
+        return
+
+    if call.data == "menu:error_log":
+        bot.answer_callback_query(call.id, "Đang đọc log lỗi")
+        bot.send_message(call.message.chat.id, format_error_log_message(), parse_mode="Markdown")
         return
 
     if call.data == "menu:clear_history_confirm":
