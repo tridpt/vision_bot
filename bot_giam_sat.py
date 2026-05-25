@@ -3,6 +3,7 @@ import cv2
 import sys
 import os
 import json
+import shutil
 import threading
 import time
 from PIL import Image
@@ -239,6 +240,18 @@ def trim_alert_history(limit):
         history = load_alert_history_unlocked()
         save_alert_history_unlocked(history[:limit])
 
+def clear_alert_history_files():
+    log_dir = os.path.abspath(LOG_DIR)
+    base_dir = os.path.abspath(BASE_DIR)
+    if os.path.basename(log_dir).lower() != "logs" or os.path.commonpath([base_dir, log_dir]) != base_dir:
+        raise RuntimeError("Duong dan logs khong hop le, da huy thao tac xoa.")
+
+    with history_lock:
+        if os.path.isdir(log_dir):
+            shutil.rmtree(log_dir)
+        ensure_log_dir()
+        save_alert_history_unlocked([])
+
 def text_preview(text, max_length=140):
     if not text:
         return "Không có phân tích"
@@ -422,7 +435,16 @@ def build_main_menu():
         telebot.types.InlineKeyboardButton("🧾 Lịch sử", callback_data="menu:history")
     )
     keyboard.add(
-        telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings")
+        telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings"),
+        telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm")
+    )
+    return keyboard
+
+def build_clear_history_confirm_menu():
+    keyboard = telebot.types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("✅ Xóa hết lịch sử", callback_data="menu:clear_history_execute"),
+        telebot.types.InlineKeyboardButton("⬅️ Không xóa", callback_data="menu:main")
     )
     return keyboard
 
@@ -935,6 +957,27 @@ def handle_menu_callback(call):
         bot.answer_callback_query(call.id, "Đang gửi lịch sử")
         edit_menu_message(call, "🧾 Đang gửi lịch sử cảnh báo gần nhất...", build_main_menu())
         send_alert_history(call.message.chat.id)
+        return
+
+    if call.data == "menu:clear_history_confirm":
+        bot.answer_callback_query(call.id)
+        edit_menu_message(
+            call,
+            "🧹 DỌN LỊCH SỬ\n\nThao tác này sẽ xóa toàn bộ ảnh, video cảnh báo và file lịch sử trong thư mục logs. Bạn chắc chắn muốn xóa?",
+            build_clear_history_confirm_menu()
+        )
+        return
+
+    if call.data == "menu:clear_history_execute":
+        try:
+            clear_alert_history_files()
+        except Exception as e:
+            bot.answer_callback_query(call.id, "Xóa lịch sử thất bại", show_alert=True)
+            edit_menu_message(call, f"❌ Không thể dọn lịch sử: {e}", build_main_menu())
+            return
+
+        bot.answer_callback_query(call.id, "Đã dọn lịch sử")
+        edit_menu_message(call, "✅ Đã xóa toàn bộ lịch sử cảnh báo.", build_main_menu())
         return
 
     if call.data == "menu:settings":
