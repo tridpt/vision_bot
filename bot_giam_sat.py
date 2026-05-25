@@ -43,6 +43,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # Tự động ghim Menu Lệnh lên màn hình chat Telegram
 bot.set_my_commands([
     telebot.types.BotCommand("/start", "Xem hướng dẫn các chức năng"),
+    telebot.types.BotCommand("/menu", "Mở menu điều khiển bằng nút bấm"),
     telebot.types.BotCommand("/auto", "🔴 BẬT Radar: Quét và báo động tự động 24/7"),
     telebot.types.BotCommand("/stop", "🟢 TẮT Radar: Cho phép camera đi ngủ"),
     telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất"),
@@ -181,6 +182,65 @@ def set_boolean_setting(message, setting_name, value, label):
     update_setting(setting_name, value)
     bot.reply_to(message, f"✅ Đã {on_off_label(value)} {label}.")
 
+def adjust_numeric_setting(setting_name, delta):
+    current = get_setting(setting_name)
+    min_value, max_value = SETTING_LIMITS[setting_name]
+    new_value = max(min_value, min(current + delta, max_value))
+    update_setting(setting_name, new_value)
+    return new_value
+
+def build_main_menu():
+    keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("🟢 Bật Radar", callback_data="menu:auto_on"),
+        telebot.types.InlineKeyboardButton("🔴 Tắt Radar", callback_data="menu:auto_off")
+    )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("📡 Trạng thái", callback_data="menu:status"),
+        telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings")
+    )
+    return keyboard
+
+def build_settings_menu():
+    current = get_settings_snapshot()
+    video_label = "📹 Tắt video" if current["send_video"] else "📹 Bật video"
+    ai_label = "🧠 Tắt Gemini" if current["use_gemini_analysis"] else "🧠 Bật Gemini"
+
+    keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("🎯 Nhạy hơn", callback_data="setting:motion_area_threshold:-1000"),
+        telebot.types.InlineKeyboardButton("🎯 Ít nhạy hơn", callback_data="setting:motion_area_threshold:1000")
+    )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("⏱️ Cooldown -5s", callback_data="setting:alert_cooldown_seconds:-5"),
+        telebot.types.InlineKeyboardButton("⏱️ Cooldown +5s", callback_data="setting:alert_cooldown_seconds:5")
+    )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("🎥 Video -1s", callback_data="setting:alert_video_seconds:-1"),
+        telebot.types.InlineKeyboardButton("🎥 Video +1s", callback_data="setting:alert_video_seconds:1")
+    )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("🎞️ FPS -5", callback_data="setting:alert_video_fps:-5"),
+        telebot.types.InlineKeyboardButton("🎞️ FPS +5", callback_data="setting:alert_video_fps:5")
+    )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton(video_label, callback_data="setting:toggle_video"),
+        telebot.types.InlineKeyboardButton(ai_label, callback_data="setting:toggle_ai")
+    )
+    keyboard.add(telebot.types.InlineKeyboardButton("⬅️ Quay lại menu", callback_data="menu:main"))
+    return keyboard
+
+def edit_menu_message(call, text, reply_markup=None):
+    try:
+        bot.edit_message_text(
+            text,
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=reply_markup
+        )
+    except Exception:
+        bot.send_message(call.message.chat.id, text, reply_markup=reply_markup)
+
 def ask_ai(image_path, user_question):
     img = Image.open(image_path)
     prompt = f"Bạn là bộ não an ninh. Chủ vừa yêu cầu: '{user_question}'. \n Hãy quan sát tỷ mỉ ảnh camera trực tiếp này và trả lời cực kỳ ngắn gọn, khách quan."
@@ -212,6 +272,20 @@ def get_camera_status_for_report():
     if auto_mode_active:
         return camera_online, last_camera_status
     return check_camera_once()
+
+def format_status_message():
+    camera_ok, camera_status = get_camera_status_for_report()
+    radar_status = "BẬT" if auto_mode_active else "TẮT"
+    camera_icon = "✅" if camera_ok else "❌"
+    alert_time = format_timestamp(last_alert_timestamp)
+
+    return (
+        "📡 TRẠNG THÁI VISION BOT\n\n"
+        "✅ Bot: Đang chạy và nhận lệnh Telegram\n"
+        f"📍 Radar: {radar_status}\n"
+        f"{camera_icon} Camera: {camera_status}\n"
+        f"🚨 Lần cảnh báo gần nhất: {alert_time}"
+    )
 
 def record_alert_video(camera_stream, first_frame, video_path, duration_seconds, fps):
     height, width = first_frame.shape[:2]
@@ -397,11 +471,20 @@ t.start()
 # --- CÁC LỆNH GIAO TIẾP GIAO DIỆN TELEGRAM ---
 # ===============================================
 
+def is_allowed_user(user_id):
+    return CHIEC_CHIA_KHOA_ID_CUA_BAN == 0 or user_id == CHIEC_CHIA_KHOA_ID_CUA_BAN
+
 def verify_user(message):
     """ Hàm lọc vân tay xác thực lại ID """
     user_id = message.from_user.id
-    if CHIEC_CHIA_KHOA_ID_CUA_BAN != 0 and user_id != CHIEC_CHIA_KHOA_ID_CUA_BAN:
+    if not is_allowed_user(user_id):
         bot.reply_to(message, "⛔ Tôi không nhận lệnh từ người lạ.")
+        return False
+    return True
+
+def verify_callback(call):
+    if not is_allowed_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "Tôi không nhận lệnh từ người lạ.", show_alert=True)
         return False
     return True
 
@@ -410,11 +493,17 @@ def send_welcome(message):
     if not verify_user(message): return
     bot.reply_to(message, "👋 Chào Boss, Trung tâm Giám sát Cơ sở.\n\n"
                           "⚙️ Dưới đây là các loại vũ khí:\n"
+                          "👉 Gõ lệnh `/menu` : Mở bảng điều khiển bằng nút bấm.\n"
                           "👉 Gõ lệnh `/auto` : BẬT Lưới Laser Tự động báo động.\n"
                           "👉 Gõ lệnh `/stop` : TẮT báo động, nhường đường lại cho tự nhiên.\n"
                           "👉 Gõ lệnh `/status` : Kiểm tra bot, radar, camera và cảnh báo gần nhất.\n"
                           "👉 Gõ lệnh `/settings` : Xem và chỉnh cấu hình bot.\n"
                           "👉 Hoặc просто Nhắn bất cứ gì (Tôi sẽ tự chụp 1 tấm để giải tỏa thắc mắc).")
+
+@bot.message_handler(commands=['menu'])
+def send_menu(message):
+    if not verify_user(message): return
+    bot.reply_to(message, "🧭 MENU ĐIỀU KHIỂN VISION BOT", reply_markup=build_main_menu())
 
 @bot.message_handler(commands=['auto'])
 def turn_on_auto(message):
@@ -434,17 +523,7 @@ def turn_off_auto(message):
 @bot.message_handler(commands=['status'])
 def send_status(message):
     if not verify_user(message): return
-    camera_ok, camera_status = get_camera_status_for_report()
-    radar_status = "BẬT" if auto_mode_active else "TẮT"
-    camera_icon = "✅" if camera_ok else "❌"
-    alert_time = format_timestamp(last_alert_timestamp)
-
-    bot.reply_to(message,
-                 "📡 TRẠNG THÁI VISION BOT\n\n"
-                 "✅ Bot: Đang chạy và nhận lệnh Telegram\n"
-                 f"📍 Radar: {radar_status}\n"
-                 f"{camera_icon} Camera: {camera_status}\n"
-                 f"🚨 Lần cảnh báo gần nhất: {alert_time}")
+    bot.reply_to(message, format_status_message())
 
 @bot.message_handler(commands=['settings'])
 def send_settings(message):
@@ -512,6 +591,68 @@ def turn_ai_on(message):
 def turn_ai_off(message):
     if not verify_user(message): return
     set_boolean_setting(message, "use_gemini_analysis", False, "phân tích Gemini khi cảnh báo")
+
+@bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("menu:") or call.data.startswith("setting:")))
+def handle_menu_callback(call):
+    if not verify_callback(call): return
+    global auto_mode_active, monitoring_chat_id
+
+    if call.data == "menu:main":
+        bot.answer_callback_query(call.id)
+        edit_menu_message(call, "🧭 MENU ĐIỀU KHIỂN VISION BOT", build_main_menu())
+        return
+
+    if call.data == "menu:auto_on":
+        auto_mode_active = True
+        monitoring_chat_id = call.message.chat.id
+        bot.answer_callback_query(call.id, "Đã bật radar")
+        edit_menu_message(call, "🟢 Đã BẬT Radar Tự động.", build_main_menu())
+        return
+
+    if call.data == "menu:auto_off":
+        auto_mode_active = False
+        bot.answer_callback_query(call.id, "Đã tắt radar")
+        edit_menu_message(call, "🔴 Đã TẮT Radar thụ động.", build_main_menu())
+        return
+
+    if call.data == "menu:status":
+        bot.answer_callback_query(call.id)
+        edit_menu_message(call, format_status_message(), build_main_menu())
+        return
+
+    if call.data == "menu:settings":
+        bot.answer_callback_query(call.id)
+        edit_menu_message(call, format_settings_message(), build_settings_menu())
+        return
+
+    if call.data == "setting:toggle_video":
+        update_setting("send_video", not get_setting("send_video"))
+        bot.answer_callback_query(call.id, "Đã cập nhật gửi video")
+        edit_menu_message(call, format_settings_message(), build_settings_menu())
+        return
+
+    if call.data == "setting:toggle_ai":
+        update_setting("use_gemini_analysis", not get_setting("use_gemini_analysis"))
+        bot.answer_callback_query(call.id, "Đã cập nhật Gemini")
+        edit_menu_message(call, format_settings_message(), build_settings_menu())
+        return
+
+    parts = call.data.split(":")
+    if len(parts) == 3 and parts[0] == "setting":
+        setting_name = parts[1]
+        try:
+            delta = int(parts[2])
+        except ValueError:
+            bot.answer_callback_query(call.id, "Giá trị nút không hợp lệ", show_alert=True)
+            return
+
+        if setting_name not in SETTING_LIMITS:
+            bot.answer_callback_query(call.id, "Setting không hợp lệ", show_alert=True)
+            return
+
+        new_value = adjust_numeric_setting(setting_name, delta)
+        bot.answer_callback_query(call.id, f"Đã cập nhật: {new_value}")
+        edit_menu_message(call, format_settings_message(), build_settings_menu())
 
 @bot.message_handler(func=lambda message: True)
 def handle_user_message(message):
