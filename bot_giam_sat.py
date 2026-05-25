@@ -364,6 +364,36 @@ def dashboard_media_url(path):
         return ""
     return f"/media?path={quote(path)}"
 
+DASHBOARD_TABS = (
+    ("status", "Trạng thái"),
+    ("history", "Lịch sử"),
+    ("settings", "Setting"),
+    ("errors", "Log lỗi")
+)
+DASHBOARD_TAB_KEYS = {key for key, _ in DASHBOARD_TABS}
+
+def normalize_dashboard_tab(tab):
+    if tab in DASHBOARD_TAB_KEYS:
+        return tab
+    return "status"
+
+def dashboard_tab_url(tab, history_filter="all"):
+    params = {"tab": normalize_dashboard_tab(tab)}
+    if params["tab"] == "history":
+        params["filter"] = normalize_dashboard_history_filter(history_filter)
+    return "/?" + urlencode(params)
+
+def render_dashboard_tabs(active_tab, history_filter="all"):
+    links = []
+    active_tab = normalize_dashboard_tab(active_tab)
+    for tab_key, label in DASHBOARD_TABS:
+        active_class = " active" if tab_key == active_tab else ""
+        links.append(
+            f'<a class="tab-link{active_class}" href="{dashboard_tab_url(tab_key, history_filter)}">'
+            f"{escape_html(label)}</a>"
+        )
+    return f'<nav class="tabs">{"".join(links)}</nav>'
+
 DASHBOARD_HISTORY_FILTERS = (
     ("all", "Tất cả"),
     ("today", "Hôm nay"),
@@ -411,7 +441,7 @@ def filter_dashboard_history(entries, history_filter):
     return sorted_entries
 
 def dashboard_filter_url(history_filter):
-    return "/?" + urlencode({"filter": history_filter})
+    return "/?" + urlencode({"tab": "history", "filter": history_filter})
 
 def render_dashboard_filter_controls(active_filter, shown_count, total_count):
     links = []
@@ -488,7 +518,8 @@ def render_dashboard_history(entries, active_filter="all"):
         )
     return "\n".join(cards)
 
-def render_dashboard_html(notice="", history_filter="all"):
+def render_dashboard_html(notice="", history_filter="all", active_tab="status"):
+    active_tab = normalize_dashboard_tab(active_tab)
     history_filter = normalize_dashboard_history_filter(history_filter)
     settings_snapshot = get_settings_snapshot()
     all_history_entries = get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
@@ -498,7 +529,7 @@ def render_dashboard_html(notice="", history_filter="all"):
         len(history_entries),
         len(all_history_entries)
     )
-    camera_ok, camera_status = get_camera_status_for_report()
+    camera_ok, camera_status = get_camera_status_for_dashboard()
     radar_status = "BẬT" if auto_mode_active else "TẮT"
     logs_size = format_size(get_directory_size(LOG_DIR))
     uptime = format_duration(time.time() - BOT_START_TIME)
@@ -514,6 +545,46 @@ def render_dashboard_html(notice="", history_filter="all"):
         notice_html = f'<section class="notice">{escape_html(notice)}</section>'
 
     camera_class = "ok" if camera_ok else "bad"
+    tabs_html = render_dashboard_tabs(active_tab, history_filter)
+    status_content = f"""
+    <section class="grid">
+      <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
+      <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_status)}</strong></div>
+      <div class="card"><span>Lịch sử</span><strong>{len(all_history_entries)}/{settings_snapshot["alert_history_limit"]}</strong></div>
+      <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
+    </section>
+
+    <section class="panel tab-panel">
+      <h2>Trạng thái</h2>
+      <table>
+        <tr><th>Uptime</th><td>{escape_html(uptime)}</td></tr>
+        <tr><th>Cảnh báo gần nhất</th><td>{escape_html(format_timestamp(last_alert_timestamp))}</td></tr>
+        <tr><th>Dashboard local</th><td>{escape_html(DASHBOARD_URL)}</td></tr>
+      </table>
+    </section>"""
+    history_content = f"""
+    <section class="tab-panel">
+      <h2>Lịch sử cảnh báo</h2>
+      {filter_controls}
+      <section class="history">{render_dashboard_history(history_entries, history_filter)}</section>
+    </section>"""
+    settings_content = f"""
+    <section class="panel tab-panel">
+      <h2>Setting</h2>
+      <table>{settings_rows}</table>
+    </section>"""
+    errors_content = f"""
+    <section class="panel tab-panel">
+      <h2>Log lỗi gần nhất</h2>
+      <pre>{error_log}</pre>
+    </section>"""
+    tab_content = {
+        "status": status_content,
+        "history": history_content,
+        "settings": settings_content,
+        "errors": errors_content
+    }[active_tab]
+
     return f"""<!doctype html>
 <html lang="vi">
 <head>
@@ -561,6 +632,10 @@ def render_dashboard_html(notice="", history_filter="all"):
     h1 {{ margin: 0 0 4px; font-size: 22px; }}
     main {{ padding: 20px 24px 40px; max-width: 1220px; margin: 0 auto; }}
     .muted {{ color: var(--muted); }}
+    .tabs {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }}
+    .tab-link {{ border: 1px solid var(--line); border-radius: 8px; color: var(--text); padding: 8px 11px; text-decoration: none; }}
+    .tab-link.active {{ background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }}
+    .tab-panel {{ margin-top: 16px; }}
     .grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
     .card, .history-card, .panel {{
       background: var(--panel);
@@ -603,39 +678,11 @@ def render_dashboard_html(notice="", history_filter="all"):
   <header>
     <h1>Vision Bot Dashboard</h1>
     <div class="muted">Chỉ mở trên máy tính này: {escape_html(DASHBOARD_URL)} · Tự refresh mỗi 30 giây</div>
+    {tabs_html}
   </header>
   <main>
     {notice_html}
-    <section class="grid">
-      <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
-      <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_status)}</strong></div>
-      <div class="card"><span>Lịch sử</span><strong>{len(history_entries)}/{len(all_history_entries)}</strong></div>
-      <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
-    </section>
-
-    <section class="layout">
-      <div class="panel">
-        <h2>Trạng thái</h2>
-        <table>
-          <tr><th>Uptime</th><td>{escape_html(uptime)}</td></tr>
-          <tr><th>Cảnh báo gần nhất</th><td>{escape_html(format_timestamp(last_alert_timestamp))}</td></tr>
-          <tr><th>Dashboard local</th><td>{escape_html(DASHBOARD_URL)}</td></tr>
-        </table>
-      </div>
-      <div class="panel">
-        <h2>Setting</h2>
-        <table>{settings_rows}</table>
-      </div>
-    </section>
-
-    <section class="panel" style="margin-top:16px">
-      <h2>Log lỗi gần nhất</h2>
-      <pre>{error_log}</pre>
-    </section>
-
-    <h2 style="margin-top:20px">Lịch sử cảnh báo</h2>
-    {filter_controls}
-    <section class="history">{render_dashboard_history(history_entries, history_filter)}</section>
+    {tab_content}
   </main>
 </body>
 </html>"""
@@ -740,6 +787,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         parsed_url = urlparse(self.path)
         if parsed_url.path in ("/", "/index.html"):
             query = parse_qs(parsed_url.query)
+            active_tab = normalize_dashboard_tab(query.get("tab", ["status"])[0])
             history_filter = normalize_dashboard_history_filter(query.get("filter", ["all"])[0])
             notice = ""
             if query.get("deleted") == ["1"]:
@@ -747,7 +795,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             elif query.get("deleted") == ["0"]:
                 notice = "Không tìm thấy cảnh báo để xóa."
 
-            body = render_dashboard_html(notice, history_filter).encode("utf-8")
+            body = render_dashboard_html(notice, history_filter, active_tab).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -781,6 +829,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         redirect_dashboard(
             self,
             "/?" + urlencode({
+                "tab": "history",
                 "filter": history_filter,
                 "deleted": "1" if deleted else "0"
             })
@@ -1189,6 +1238,13 @@ def get_camera_status_for_report():
     if auto_mode_active:
         return camera_online, last_camera_status
     return check_camera_once()
+
+def get_camera_status_for_dashboard():
+    if auto_mode_active:
+        return camera_online, last_camera_status
+    if last_camera_status and last_camera_status != "Chưa kiểm tra camera":
+        return camera_online, last_camera_status
+    return False, "Camera chưa kiểm tra trên dashboard"
 
 def format_duration(seconds):
     seconds = max(0, int(seconds))
