@@ -46,16 +46,7 @@ bot.set_my_commands([
     telebot.types.BotCommand("/menu", "Mở menu điều khiển bằng nút bấm"),
     telebot.types.BotCommand("/auto", "🔴 BẬT Radar: Quét và báo động tự động 24/7"),
     telebot.types.BotCommand("/stop", "🟢 TẮT Radar: Cho phép camera đi ngủ"),
-    telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất"),
-    telebot.types.BotCommand("/settings", "Xem cấu hình hiện tại và các lệnh chỉnh bot"),
-    telebot.types.BotCommand("/set_sensitivity", "Chỉnh ngưỡng chuyển động, số nhỏ nhạy hơn"),
-    telebot.types.BotCommand("/set_cooldown", "Chỉnh thời gian chống spam cảnh báo"),
-    telebot.types.BotCommand("/set_video_seconds", "Chỉnh độ dài clip cảnh báo từ 5 đến 10 giây"),
-    telebot.types.BotCommand("/set_video_fps", "Chỉnh FPS clip cảnh báo từ 5 đến 30"),
-    telebot.types.BotCommand("/video_on", "Bật gửi video cảnh báo"),
-    telebot.types.BotCommand("/video_off", "Tắt gửi video cảnh báo"),
-    telebot.types.BotCommand("/ai_on", "Bật phân tích Gemini khi cảnh báo"),
-    telebot.types.BotCommand("/ai_off", "Tắt phân tích Gemini khi cảnh báo")
+    telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất")
 ])
 
 # Cơ chế Threading
@@ -66,6 +57,29 @@ camera_online = False
 last_camera_status = "Chưa kiểm tra camera"
 last_alert_timestamp = None
 settings_lock = threading.Lock()
+pending_setting_inputs = {}
+pending_setting_lock = threading.Lock()
+
+SETTING_LABELS = {
+    "motion_area_threshold": "độ nhạy chuyển động",
+    "alert_cooldown_seconds": "cooldown cảnh báo",
+    "alert_video_seconds": "độ dài video",
+    "alert_video_fps": "FPS video"
+}
+
+SETTING_UNITS = {
+    "motion_area_threshold": "",
+    "alert_cooldown_seconds": " giây",
+    "alert_video_seconds": " giây",
+    "alert_video_fps": ""
+}
+
+SETTING_EXAMPLES = {
+    "motion_area_threshold": "8000",
+    "alert_cooldown_seconds": "20",
+    "alert_video_seconds": "7",
+    "alert_video_fps": "10"
+}
 
 def clamp_int(value, default, min_value, max_value):
     try:
@@ -145,13 +159,7 @@ def format_settings_message():
         f"🎞️ FPS video: {current['alert_video_fps']}\n"
         f"📹 Gửi video: {on_off_label(current['send_video'])}\n"
         f"🧠 Phân tích Gemini: {on_off_label(current['use_gemini_analysis'])}\n\n"
-        "Lệnh chỉnh:\n"
-        "/set_sensitivity 8000\n"
-        "/set_cooldown 20\n"
-        "/set_video_seconds 7\n"
-        "/set_video_fps 10\n"
-        "/video_on hoặc /video_off\n"
-        "/ai_on hoặc /ai_off"
+        "Bấm nút bên dưới để chỉnh. Với các mục số, bot sẽ hỏi và bạn chỉ cần nhập số mới vào khung chat."
     )
 
 def parse_int_argument(message, command_name):
@@ -166,6 +174,7 @@ def parse_int_argument(message, command_name):
         return None
 
 def set_numeric_setting(message, setting_name, command_name, label, unit=""):
+    clear_pending_setting_input(message)
     value = parse_int_argument(message, command_name)
     if value is None:
         return
@@ -179,8 +188,74 @@ def set_numeric_setting(message, setting_name, command_name, label, unit=""):
     bot.reply_to(message, f"✅ Đã cập nhật {label}: {value}{unit}")
 
 def set_boolean_setting(message, setting_name, value, label):
+    clear_pending_setting_input(message)
     update_setting(setting_name, value)
     bot.reply_to(message, f"✅ Đã {on_off_label(value)} {label}.")
+
+def pending_key_from_message(message):
+    return (message.chat.id, message.from_user.id)
+
+def pending_key_from_call(call):
+    return (call.message.chat.id, call.from_user.id)
+
+def set_pending_setting_input(call, setting_name):
+    with pending_setting_lock:
+        pending_setting_inputs[pending_key_from_call(call)] = setting_name
+
+def pop_pending_setting_input(message):
+    with pending_setting_lock:
+        return pending_setting_inputs.pop(pending_key_from_message(message), None)
+
+def clear_pending_setting_input(message):
+    with pending_setting_lock:
+        pending_setting_inputs.pop(pending_key_from_message(message), None)
+
+def build_setting_prompt(setting_name):
+    label = SETTING_LABELS[setting_name]
+    unit = SETTING_UNITS[setting_name]
+    min_value, max_value = SETTING_LIMITS[setting_name]
+    current_value = get_setting(setting_name)
+    example = SETTING_EXAMPLES[setting_name]
+    return (
+        f"Nhập {label} mới.\n"
+        f"Hiện tại: {current_value}{unit}\n"
+        f"Khoảng hợp lệ: {min_value}-{max_value}{unit}\n"
+        f"Ví dụ: {example}\n\n"
+        "Gõ hủy để bỏ qua."
+    )
+
+def handle_pending_setting_input(message):
+    setting_name = pop_pending_setting_input(message)
+    if setting_name is None:
+        return False
+
+    text = message.text.strip()
+    if text.lower() in ("hủy", "huy", "cancel", "/cancel"):
+        bot.reply_to(message, "Đã hủy chỉnh setting.", reply_markup=build_settings_menu())
+        return True
+
+    try:
+        value = int(text)
+    except ValueError:
+        set_pending_setting_input_from_message(message, setting_name)
+        bot.reply_to(message, "Giá trị phải là số nguyên. Nhập lại hoặc gõ hủy.")
+        return True
+
+    min_value, max_value = SETTING_LIMITS[setting_name]
+    label = SETTING_LABELS[setting_name]
+    unit = SETTING_UNITS[setting_name]
+    if not min_value <= value <= max_value:
+        set_pending_setting_input_from_message(message, setting_name)
+        bot.reply_to(message, f"{label} phải nằm trong khoảng {min_value}-{max_value}{unit}. Nhập lại hoặc gõ hủy.")
+        return True
+
+    update_setting(setting_name, value)
+    bot.reply_to(message, f"✅ Đã cập nhật {label}: {value}{unit}", reply_markup=build_settings_menu())
+    return True
+
+def set_pending_setting_input_from_message(message, setting_name):
+    with pending_setting_lock:
+        pending_setting_inputs[pending_key_from_message(message)] = setting_name
 
 def adjust_numeric_setting(setting_name, delta):
     current = get_setting(setting_name)
@@ -208,20 +283,12 @@ def build_settings_menu():
 
     keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        telebot.types.InlineKeyboardButton("🎯 Nhạy hơn", callback_data="setting:motion_area_threshold:-1000"),
-        telebot.types.InlineKeyboardButton("🎯 Ít nhạy hơn", callback_data="setting:motion_area_threshold:1000")
+        telebot.types.InlineKeyboardButton("🎯 Nhập độ nhạy", callback_data="setting:input:motion_area_threshold"),
+        telebot.types.InlineKeyboardButton("⏱️ Nhập cooldown", callback_data="setting:input:alert_cooldown_seconds")
     )
     keyboard.add(
-        telebot.types.InlineKeyboardButton("⏱️ Cooldown -5s", callback_data="setting:alert_cooldown_seconds:-5"),
-        telebot.types.InlineKeyboardButton("⏱️ Cooldown +5s", callback_data="setting:alert_cooldown_seconds:5")
-    )
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("🎥 Video -1s", callback_data="setting:alert_video_seconds:-1"),
-        telebot.types.InlineKeyboardButton("🎥 Video +1s", callback_data="setting:alert_video_seconds:1")
-    )
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("🎞️ FPS -5", callback_data="setting:alert_video_fps:-5"),
-        telebot.types.InlineKeyboardButton("🎞️ FPS +5", callback_data="setting:alert_video_fps:5")
+        telebot.types.InlineKeyboardButton("🎥 Nhập giây video", callback_data="setting:input:alert_video_seconds"),
+        telebot.types.InlineKeyboardButton("🎞️ Nhập FPS", callback_data="setting:input:alert_video_fps")
     )
     keyboard.add(
         telebot.types.InlineKeyboardButton(video_label, callback_data="setting:toggle_video"),
@@ -491,23 +558,26 @@ def verify_callback(call):
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     if not verify_user(message): return
+    clear_pending_setting_input(message)
     bot.reply_to(message, "👋 Chào Boss, Trung tâm Giám sát Cơ sở.\n\n"
                           "⚙️ Dưới đây là các loại vũ khí:\n"
                           "👉 Gõ lệnh `/menu` : Mở bảng điều khiển bằng nút bấm.\n"
                           "👉 Gõ lệnh `/auto` : BẬT Lưới Laser Tự động báo động.\n"
                           "👉 Gõ lệnh `/stop` : TẮT báo động, nhường đường lại cho tự nhiên.\n"
                           "👉 Gõ lệnh `/status` : Kiểm tra bot, radar, camera và cảnh báo gần nhất.\n"
-                          "👉 Gõ lệnh `/settings` : Xem và chỉnh cấu hình bot.\n"
+                          "👉 Trong `/menu`, chọn Cài đặt để chỉnh độ nhạy, cooldown, video và Gemini.\n"
                           "👉 Hoặc просто Nhắn bất cứ gì (Tôi sẽ tự chụp 1 tấm để giải tỏa thắc mắc).")
 
 @bot.message_handler(commands=['menu'])
 def send_menu(message):
     if not verify_user(message): return
+    clear_pending_setting_input(message)
     bot.reply_to(message, "🧭 MENU ĐIỀU KHIỂN VISION BOT", reply_markup=build_main_menu())
 
 @bot.message_handler(commands=['auto'])
 def turn_on_auto(message):
     if not verify_user(message): return
+    clear_pending_setting_input(message)
     global auto_mode_active, monitoring_chat_id
     auto_mode_active = True
     monitoring_chat_id = message.chat.id
@@ -516,6 +586,7 @@ def turn_on_auto(message):
 @bot.message_handler(commands=['stop'])
 def turn_off_auto(message):
     if not verify_user(message): return
+    clear_pending_setting_input(message)
     global auto_mode_active
     auto_mode_active = False
     bot.reply_to(message, "🔴 Đã TẮT Radar thụ động. Mắt camera đã tạm đóng kín.")
@@ -523,12 +594,14 @@ def turn_off_auto(message):
 @bot.message_handler(commands=['status'])
 def send_status(message):
     if not verify_user(message): return
+    clear_pending_setting_input(message)
     bot.reply_to(message, format_status_message())
 
 @bot.message_handler(commands=['settings'])
 def send_settings(message):
     if not verify_user(message): return
-    bot.reply_to(message, format_settings_message())
+    clear_pending_setting_input(message)
+    bot.reply_to(message, format_settings_message(), reply_markup=build_settings_menu())
 
 @bot.message_handler(commands=['set_sensitivity'])
 def set_sensitivity(message):
@@ -625,6 +698,17 @@ def handle_menu_callback(call):
         edit_menu_message(call, format_settings_message(), build_settings_menu())
         return
 
+    if call.data.startswith("setting:input:"):
+        setting_name = call.data.split(":", 2)[2]
+        if setting_name not in SETTING_LIMITS:
+            bot.answer_callback_query(call.id, "Setting không hợp lệ", show_alert=True)
+            return
+
+        set_pending_setting_input(call, setting_name)
+        bot.answer_callback_query(call.id, "Nhập số trong khung chat")
+        bot.send_message(call.message.chat.id, build_setting_prompt(setting_name))
+        return
+
     if call.data == "setting:toggle_video":
         update_setting("send_video", not get_setting("send_video"))
         bot.answer_callback_query(call.id, "Đã cập nhật gửi video")
@@ -658,6 +742,9 @@ def handle_menu_callback(call):
 def handle_user_message(message):
     if not verify_user(message): return
     global auto_mode_active
+
+    if handle_pending_setting_input(message):
+        return
     
     question = message.text
     bot.reply_to(message, "👁️ Đang chụp ảnh phân tích theo lệnh...")
