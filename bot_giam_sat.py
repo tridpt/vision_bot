@@ -364,7 +364,74 @@ def dashboard_media_url(path):
         return ""
     return f"/media?path={quote(path)}"
 
-def render_dashboard_history(entries):
+DASHBOARD_HISTORY_FILTERS = (
+    ("all", "Tất cả"),
+    ("today", "Hôm nay"),
+    ("with_video", "Có video"),
+    ("without_video", "Không có video"),
+    ("newest", "Mới nhất")
+)
+DASHBOARD_HISTORY_FILTER_KEYS = {key for key, _ in DASHBOARD_HISTORY_FILTERS}
+
+def normalize_dashboard_history_filter(history_filter):
+    if history_filter in DASHBOARD_HISTORY_FILTER_KEYS:
+        return history_filter
+    return "all"
+
+def alert_timestamp_value(entry):
+    try:
+        return float(entry.get("timestamp") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+def alert_has_dashboard_video(entry):
+    video_path = entry.get("video_path")
+    return is_safe_alert_media_path(video_path) and os.path.exists(absolute_from_base(video_path))
+
+def alert_is_today(entry):
+    timestamp = alert_timestamp_value(entry)
+    if not timestamp:
+        return False
+    today = time.strftime("%Y-%m-%d", time.localtime())
+    alert_day = time.strftime("%Y-%m-%d", time.localtime(timestamp))
+    return alert_day == today
+
+def filter_dashboard_history(entries, history_filter):
+    history_filter = normalize_dashboard_history_filter(history_filter)
+    sorted_entries = sorted(entries, key=alert_timestamp_value, reverse=True)
+
+    if history_filter == "today":
+        return [entry for entry in sorted_entries if alert_is_today(entry)]
+    if history_filter == "with_video":
+        return [entry for entry in sorted_entries if alert_has_dashboard_video(entry)]
+    if history_filter == "without_video":
+        return [entry for entry in sorted_entries if not alert_has_dashboard_video(entry)]
+    if history_filter == "newest":
+        return sorted_entries[:10]
+    return sorted_entries
+
+def dashboard_filter_url(history_filter):
+    return "/?" + urlencode({"filter": history_filter})
+
+def render_dashboard_filter_controls(active_filter, shown_count, total_count):
+    links = []
+    for filter_key, label in DASHBOARD_HISTORY_FILTERS:
+        active_class = " active" if filter_key == active_filter else ""
+        links.append(
+            f'<a class="filter-link{active_class}" href="{dashboard_filter_url(filter_key)}">'
+            f"{escape_html(label)}</a>"
+        )
+
+    return (
+        '<div class="filter-bar">'
+        '<div class="filter-links">'
+        f"{''.join(links)}"
+        "</div>"
+        f'<span class="filter-count">Đang hiển thị {shown_count}/{total_count}</span>'
+        "</div>"
+    )
+
+def render_dashboard_history(entries, active_filter="all"):
     if not entries:
         return '<section class="empty">Chưa có cảnh báo nào.</section>'
 
@@ -383,6 +450,7 @@ def render_dashboard_history(entries):
                 '<form class="delete-form" method="post" action="/delete-alert" '
                 'onsubmit="return confirm(\'Xóa cảnh báo này?\')">'
                 f'<input type="hidden" name="id" value="{escape_html(alert_id)}">'
+                f'<input type="hidden" name="filter" value="{escape_html(active_filter)}">'
                 '<button class="delete-button" type="submit">Xóa</button>'
                 '</form>'
             )
@@ -420,9 +488,16 @@ def render_dashboard_history(entries):
         )
     return "\n".join(cards)
 
-def render_dashboard_html(notice=""):
+def render_dashboard_html(notice="", history_filter="all"):
+    history_filter = normalize_dashboard_history_filter(history_filter)
     settings_snapshot = get_settings_snapshot()
-    history_entries = get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
+    all_history_entries = get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
+    history_entries = filter_dashboard_history(all_history_entries, history_filter)
+    filter_controls = render_dashboard_filter_controls(
+        history_filter,
+        len(history_entries),
+        len(all_history_entries)
+    )
     camera_ok, camera_status = get_camera_status_for_report()
     radar_status = "BẬT" if auto_mode_active else "TẮT"
     logs_size = format_size(get_directory_size(LOG_DIR))
@@ -505,6 +580,11 @@ def render_dashboard_html(notice=""):
     .history {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }}
     .history-meta {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; color: var(--muted); margin-bottom: 8px; }}
     .history-meta span {{ display: block; }}
+    .filter-bar {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 12px; flex-wrap: wrap; }}
+    .filter-links {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+    .filter-link {{ border: 1px solid var(--line); border-radius: 999px; color: var(--text); padding: 6px 10px; text-decoration: none; }}
+    .filter-link.active {{ background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }}
+    .filter-count {{ color: var(--muted); }}
     .delete-form {{ margin: 0; }}
     .delete-button {{ border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--bad); cursor: pointer; font: inherit; font-weight: 700; padding: 5px 9px; }}
     .delete-button:hover {{ border-color: var(--bad); }}
@@ -529,7 +609,7 @@ def render_dashboard_html(notice=""):
     <section class="grid">
       <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
       <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_status)}</strong></div>
-      <div class="card"><span>Lịch sử</span><strong>{len(history_entries)}/{settings_snapshot["alert_history_limit"]}</strong></div>
+      <div class="card"><span>Lịch sử</span><strong>{len(history_entries)}/{len(all_history_entries)}</strong></div>
       <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
     </section>
 
@@ -554,7 +634,8 @@ def render_dashboard_html(notice=""):
     </section>
 
     <h2 style="margin-top:20px">Lịch sử cảnh báo</h2>
-    <section class="history">{render_dashboard_history(history_entries)}</section>
+    {filter_controls}
+    <section class="history">{render_dashboard_history(history_entries, history_filter)}</section>
   </main>
 </body>
 </html>"""
@@ -659,13 +740,14 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         parsed_url = urlparse(self.path)
         if parsed_url.path in ("/", "/index.html"):
             query = parse_qs(parsed_url.query)
+            history_filter = normalize_dashboard_history_filter(query.get("filter", ["all"])[0])
             notice = ""
             if query.get("deleted") == ["1"]:
                 notice = "Đã xóa cảnh báo."
             elif query.get("deleted") == ["0"]:
                 notice = "Không tìm thấy cảnh báo để xóa."
 
-            body = render_dashboard_html(notice).encode("utf-8")
+            body = render_dashboard_html(notice, history_filter).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -692,9 +774,17 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             content_length = 0
 
         body = self.rfile.read(min(content_length, 4096)).decode("utf-8", errors="replace")
-        alert_id = parse_qs(body).get("id", [""])[0]
+        form = parse_qs(body)
+        alert_id = form.get("id", [""])[0]
+        history_filter = normalize_dashboard_history_filter(form.get("filter", ["all"])[0])
         deleted = delete_alert_history_entry(alert_id)
-        redirect_dashboard(self, "/?" + urlencode({"deleted": "1" if deleted else "0"}))
+        redirect_dashboard(
+            self,
+            "/?" + urlencode({
+                "filter": history_filter,
+                "deleted": "1" if deleted else "0"
+            })
+        )
 
     def log_message(self, format, *args):
         return
