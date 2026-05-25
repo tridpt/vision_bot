@@ -1,16 +1,18 @@
 import sys
+import os
 from PIL import Image
 from google import genai
+from dotenv import load_dotenv
 
 # Sửa lỗi hiển thị tiếng Việt trên Terminal của Windows
 sys.stdout.reconfigure(encoding='utf-8')
 
 def analyze_image():
-    # 👇 BẠN HÃY ĐIỀN API KEY CỦA MÌNH VÀO DỮ LIỆU DƯỚI ĐÂY 👇
-    API_KEY = "AIzaSyA8MJ1INRGOuAhsilHjbGoWCmJ6vBbsIyg"
+    load_dotenv()
+    API_KEY = os.getenv("GEMINI_API_KEY")
     
-    if API_KEY == "ĐIỀN_API_KEY_CỦA_BẠN_VÀO_ĐÂY":
-        print("❌ Bạn chưa nhập API Key! Hãy mở file nhan_dien.py lên, dán API_KEY vào và chạy lại nhé.")
+    if not API_KEY:
+        print("❌ Chưa tìm thấy GEMINI_API_KEY trong file .env. Hãy thêm key vào .env rồi chạy lại nhé.")
         return
 
     print("Đang khởi động tư duy AI và đọc ảnh...")
