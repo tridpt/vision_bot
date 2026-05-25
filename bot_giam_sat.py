@@ -13,6 +13,32 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SINGLE_INSTANCE_MUTEX_NAME = "Local\\VisionBot_Surveillance_SingleInstance"
+_single_instance_mutex_handle = None
+
+def ensure_single_instance():
+    global _single_instance_mutex_handle
+    if os.name != "nt":
+        return
+
+    import ctypes
+
+    error_already_exists = 183
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+
+    mutex_handle = kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_MUTEX_NAME)
+    if not mutex_handle:
+        return
+
+    _single_instance_mutex_handle = mutex_handle
+    if ctypes.get_last_error() == error_already_exists:
+        if sys.stdout:
+            print("Vision bot da dang chay. Thoat instance thu hai.")
+        sys.exit(0)
+
+ensure_single_instance()
 
 # --- BẢO MẬT: Load thông tin bí mật từ file .env ---
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -24,22 +50,24 @@ CHIEC_CHIA_KHOA_ID_CUA_BAN = int(os.getenv("ALLOWED_USER_ID", 0))
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 ALERT_HISTORY_FILE = os.path.join(LOG_DIR, "alert_history.json")
-ALERT_HISTORY_LIMIT = 50
 HISTORY_PREVIEW_LIMIT = 3
+HISTORY_LIMIT_CHOICES = (10, 50, 100)
 DEFAULT_SETTINGS = {
     "motion_area_threshold": 8000,
     "alert_cooldown_seconds": 10,
     "alert_video_seconds": 7,
     "alert_video_fps": 10,
     "send_video": True,
-    "use_gemini_analysis": True
+    "use_gemini_analysis": True,
+    "alert_history_limit": 50
 }
 
 SETTING_LIMITS = {
     "motion_area_threshold": (500, 50000),
     "alert_cooldown_seconds": (3, 3600),
     "alert_video_seconds": (5, 10),
-    "alert_video_fps": (5, 30)
+    "alert_video_fps": (5, 30),
+    "alert_history_limit": (10, 100)
 }
 
 # Khởi tạo kết nối
@@ -71,21 +99,24 @@ SETTING_LABELS = {
     "motion_area_threshold": "độ nhạy chuyển động",
     "alert_cooldown_seconds": "cooldown cảnh báo",
     "alert_video_seconds": "độ dài video",
-    "alert_video_fps": "FPS video"
+    "alert_video_fps": "FPS video",
+    "alert_history_limit": "số cảnh báo giữ trong lịch sử"
 }
 
 SETTING_UNITS = {
     "motion_area_threshold": "",
     "alert_cooldown_seconds": " giây",
     "alert_video_seconds": " giây",
-    "alert_video_fps": ""
+    "alert_video_fps": "",
+    "alert_history_limit": " cảnh báo"
 }
 
 SETTING_EXAMPLES = {
     "motion_area_threshold": "8000",
     "alert_cooldown_seconds": "20",
     "alert_video_seconds": "7",
-    "alert_video_fps": "10"
+    "alert_video_fps": "10",
+    "alert_history_limit": "50"
 }
 
 def clamp_int(value, default, min_value, max_value):
@@ -111,6 +142,12 @@ def normalize_settings(raw_settings):
 
     for key, (min_value, max_value) in SETTING_LIMITS.items():
         normalized[key] = clamp_int(normalized[key], DEFAULT_SETTINGS[key], min_value, max_value)
+
+    if normalized["alert_history_limit"] not in HISTORY_LIMIT_CHOICES:
+        normalized["alert_history_limit"] = min(
+            HISTORY_LIMIT_CHOICES,
+            key=lambda choice: abs(choice - normalized["alert_history_limit"])
+        )
 
     normalized["send_video"] = normalize_bool(
         normalized["send_video"],
@@ -191,11 +228,16 @@ def add_alert_history(entry):
     with history_lock:
         history = load_alert_history_unlocked()
         history.insert(0, entry)
-        save_alert_history_unlocked(history[:ALERT_HISTORY_LIMIT])
+        save_alert_history_unlocked(history[:get_setting("alert_history_limit")])
 
 def get_recent_alert_history(limit=HISTORY_PREVIEW_LIMIT):
     with history_lock:
         return load_alert_history_unlocked()[:limit]
+
+def trim_alert_history(limit):
+    with history_lock:
+        history = load_alert_history_unlocked()
+        save_alert_history_unlocked(history[:limit])
 
 def text_preview(text, max_length=140):
     if not text:
@@ -258,6 +300,7 @@ def format_settings_message():
         f"🎞️ FPS video: {current['alert_video_fps']}\n"
         f"📹 Gửi video: {on_off_label(current['send_video'])}\n"
         f"🧠 Phân tích Gemini: {on_off_label(current['use_gemini_analysis'])}\n\n"
+        f"🧾 Giữ lịch sử: {current['alert_history_limit']} cảnh báo\n\n"
         "Bấm nút bên dưới để chỉnh. Với các mục số, bot sẽ hỏi và bạn chỉ cần nhập số mới vào khung chat."
     )
 
@@ -382,6 +425,13 @@ def build_settings_menu():
     current = get_settings_snapshot()
     video_label = "📹 Tắt video" if current["send_video"] else "📹 Bật video"
     ai_label = "🧠 Tắt Gemini" if current["use_gemini_analysis"] else "🧠 Bật Gemini"
+    history_buttons = [
+        telebot.types.InlineKeyboardButton(
+            f"{'✅ ' if current['alert_history_limit'] == choice else ''}{choice} cảnh báo",
+            callback_data=f"setting:history_limit:{choice}"
+        )
+        for choice in HISTORY_LIMIT_CHOICES
+    ]
 
     keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
     keyboard.add(
@@ -396,6 +446,7 @@ def build_settings_menu():
         telebot.types.InlineKeyboardButton(video_label, callback_data="setting:toggle_video"),
         telebot.types.InlineKeyboardButton(ai_label, callback_data="setting:toggle_ai")
     )
+    keyboard.add(*history_buttons)
     keyboard.add(telebot.types.InlineKeyboardButton("⬅️ Quay lại menu", callback_data="menu:main"))
     return keyboard
 
@@ -852,6 +903,23 @@ def handle_menu_callback(call):
     if call.data == "setting:toggle_ai":
         update_setting("use_gemini_analysis", not get_setting("use_gemini_analysis"))
         bot.answer_callback_query(call.id, "Đã cập nhật Gemini")
+        edit_menu_message(call, format_settings_message(), build_settings_menu())
+        return
+
+    if call.data.startswith("setting:history_limit:"):
+        try:
+            history_limit = int(call.data.rsplit(":", 1)[1])
+        except ValueError:
+            bot.answer_callback_query(call.id, "Giá trị lịch sử không hợp lệ", show_alert=True)
+            return
+
+        if history_limit not in HISTORY_LIMIT_CHOICES:
+            bot.answer_callback_query(call.id, "Chỉ hỗ trợ 10, 50 hoặc 100 cảnh báo", show_alert=True)
+            return
+
+        update_setting("alert_history_limit", history_limit)
+        trim_alert_history(history_limit)
+        bot.answer_callback_query(call.id, f"Giữ {history_limit} cảnh báo gần nhất")
         edit_menu_message(call, format_settings_message(), build_settings_menu())
         return
 
