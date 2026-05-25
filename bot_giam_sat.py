@@ -5,6 +5,7 @@ import os
 import json
 import logging
 import shutil
+import subprocess
 import threading
 import time
 from logging.handlers import RotatingFileHandler
@@ -98,6 +99,22 @@ def log_error(context, error=None):
         error_logger.error(context)
     else:
         error_logger.exception("%s: %s", context, error)
+
+def schedule_bot_restart():
+    restart_script = os.path.join(BASE_DIR, "Chay_Bot_Ngam.vbs")
+    if not os.path.exists(restart_script):
+        raise FileNotFoundError(restart_script)
+
+    command = (
+        "Start-Sleep -Seconds 3; "
+        f"Start-Process -FilePath 'wscript.exe' -ArgumentList '\"{restart_script}\"' -WindowStyle Hidden"
+    )
+    creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=BASE_DIR,
+        creationflags=creation_flags
+    )
 
 # Khởi tạo kết nối
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
@@ -538,7 +555,16 @@ def build_main_menu():
         telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings")
     )
     keyboard.add(
+        telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm"),
         telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm")
+    )
+    return keyboard
+
+def build_restart_confirm_menu():
+    keyboard = telebot.types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("✅ Restart ngay", callback_data="menu:restart_execute"),
+        telebot.types.InlineKeyboardButton("⬅️ Không restart", callback_data="menu:main")
     )
     return keyboard
 
@@ -744,6 +770,22 @@ def format_status_message():
         f"⏳ Uptime: {uptime}\n"
         f"⚙️ Setting: {format_settings_snapshot(settings_snapshot)}"
     )
+
+def send_startup_notification():
+    if CHIEC_CHIA_KHOA_ID_CUA_BAN == 0:
+        log_error("Khong gui startup notification vi ALLOWED_USER_ID chua duoc cau hinh.")
+        return
+
+    started_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(BOT_START_TIME))
+    try:
+        bot.send_message(
+            CHIEC_CHIA_KHOA_ID_CUA_BAN,
+            "✅ Vision Bot đã online.\n"
+            f"🕒 Khởi động lúc: {started_at}\n"
+            "Gõ /menu để mở bảng điều khiển."
+        )
+    except Exception as e:
+        log_error("Khong gui duoc startup notification", e)
 
 def record_alert_video(camera_stream, first_frame, video_path, duration_seconds, fps):
     height, width = first_frame.shape[:2]
@@ -1140,6 +1182,29 @@ def handle_menu_callback(call):
         bot.send_message(call.message.chat.id, format_error_log_message(), parse_mode="Markdown")
         return
 
+    if call.data == "menu:restart_confirm":
+        bot.answer_callback_query(call.id)
+        edit_menu_message(
+            call,
+            "🔄 RESTART BOT\n\nBot sẽ tự tắt process hiện tại và mở lại sau vài giây. Bạn chắc chắn muốn restart?",
+            build_restart_confirm_menu()
+        )
+        return
+
+    if call.data == "menu:restart_execute":
+        try:
+            schedule_bot_restart()
+        except Exception as e:
+            log_error("Khong len lich restart bot", e)
+            bot.answer_callback_query(call.id, "Restart thất bại", show_alert=True)
+            edit_menu_message(call, f"❌ Không thể restart bot: {e}", build_main_menu())
+            return
+
+        bot.answer_callback_query(call.id, "Đang restart bot")
+        edit_menu_message(call, "🔄 Bot đang restart. Chờ vài giây rồi gõ /menu để kiểm tra lại.")
+        time.sleep(0.5)
+        os._exit(0)
+
     if call.data == "menu:clear_history_confirm":
         bot.answer_callback_query(call.id)
         edit_menu_message(
@@ -1238,4 +1303,5 @@ if __name__ == "__main__":
         print("❌ LỖI: Token vắng mặt")
     else:
         print("🚀 Khởi chạy hệ điều hành BOT GIÁM SÁT KÉP (Nhận lệnh liên tục!).")
+        send_startup_notification()
         bot.infinity_polling(timeout=10, long_polling_timeout=5)
