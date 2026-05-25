@@ -13,7 +13,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from PIL import Image
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from google import genai
 from dotenv import load_dotenv
 
@@ -310,6 +310,27 @@ def delete_alert_media_for_entries(entries):
         delete_alert_media_file(entry.get("image_path"))
         delete_alert_media_file(entry.get("video_path"))
 
+def delete_alert_history_entry(alert_id):
+    if not alert_id:
+        return False
+
+    with history_lock:
+        history = load_alert_history_unlocked()
+        kept_history = []
+        removed_history = []
+        for entry in history:
+            if str(entry.get("id", "")) == str(alert_id):
+                removed_history.append(entry)
+            else:
+                kept_history.append(entry)
+
+        if not removed_history:
+            return False
+
+        save_alert_history_unlocked(kept_history)
+        delete_alert_media_for_entries(removed_history)
+        return True
+
 def tail_error_log(max_lines=20):
     if not os.path.exists(ERROR_LOG_FILE):
         return "Chưa có log lỗi nào."
@@ -354,6 +375,17 @@ def render_dashboard_history(entries):
         video_status = entry.get("video_status") or "Không có video"
         image_path = entry.get("image_path")
         video_path = entry.get("video_path")
+        alert_id = str(entry.get("id") or "")
+
+        delete_html = ""
+        if alert_id:
+            delete_html = (
+                '<form class="delete-form" method="post" action="/delete-alert" '
+                'onsubmit="return confirm(\'Xóa cảnh báo này?\')">'
+                f'<input type="hidden" name="id" value="{escape_html(alert_id)}">'
+                '<button class="delete-button" type="submit">Xóa</button>'
+                '</form>'
+            )
 
         image_html = ""
         if is_safe_alert_media_path(image_path) and os.path.exists(absolute_from_base(image_path)):
@@ -375,15 +407,20 @@ def render_dashboard_history(entries):
 
         cards.append(
             "<article class=\"history-card\">"
-            f"<div class=\"history-meta\"><strong>{escape_html(timestamp)}</strong>"
-            f"<span>{escape_html(video_status)}</span></div>"
+            "<div class=\"history-meta\">"
+            "<div>"
+            f"<strong>{escape_html(timestamp)}</strong>"
+            f"<span>{escape_html(video_status)}</span>"
+            "</div>"
+            f"{delete_html}"
+            "</div>"
             f"<p>{escape_html(analysis)}</p>"
             f"{image_html}{video_html}"
             "</article>"
         )
     return "\n".join(cards)
 
-def render_dashboard_html():
+def render_dashboard_html(notice=""):
     settings_snapshot = get_settings_snapshot()
     history_entries = get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
     camera_ok, camera_status = get_camera_status_for_report()
@@ -396,6 +433,10 @@ def render_dashboard_html():
         f"<tr><th>{escape_html(key)}</th><td>{escape_html(value)}</td></tr>"
         for key, value in settings_snapshot.items()
     )
+
+    notice_html = ""
+    if notice:
+        notice_html = f'<section class="notice">{escape_html(notice)}</section>'
 
     camera_class = "ok" if camera_ok else "bad"
     return f"""<!doctype html>
@@ -462,9 +503,14 @@ def render_dashboard_html():
     th, td {{ text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }}
     th {{ color: var(--muted); width: 45%; font-weight: 600; }}
     .history {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }}
-    .history-meta {{ display: flex; justify-content: space-between; gap: 12px; color: var(--muted); margin-bottom: 8px; }}
+    .history-meta {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; color: var(--muted); margin-bottom: 8px; }}
+    .history-meta span {{ display: block; }}
+    .delete-form {{ margin: 0; }}
+    .delete-button {{ border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--bad); cursor: pointer; font: inherit; font-weight: 700; padding: 5px 9px; }}
+    .delete-button:hover {{ border-color: var(--bad); }}
     .history-card img, .history-card video {{ width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; border: 1px solid var(--line); background: #000; margin-top: 8px; }}
     .media-link {{ display: inline-block; margin-top: 8px; color: var(--accent); font-weight: 700; text-decoration: none; }}
+    .notice {{ margin-bottom: 14px; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--panel); }}
     pre {{ white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; color: var(--muted); }}
     .empty {{ padding: 20px; color: var(--muted); }}
     @media (max-width: 860px) {{
@@ -479,6 +525,7 @@ def render_dashboard_html():
     <div class="muted">Chỉ mở trên máy tính này: {escape_html(DASHBOARD_URL)} · Tự refresh mỗi 30 giây</div>
   </header>
   <main>
+    {notice_html}
     <section class="grid">
       <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
       <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_status)}</strong></div>
@@ -578,8 +625,8 @@ def send_dashboard_file(handler, absolute_path, content_type):
                 break
             try:
                 handler.wfile.write(chunk)
-            except (BrokenPipeError, ConnectionResetError):
-                break
+            except (ConnectionError, TimeoutError):
+                return
             remaining -= len(chunk)
 
 def serve_dashboard_media(handler, query):
@@ -600,11 +647,25 @@ def serve_dashboard_media(handler, query):
         log_error(f"Khong doc duoc media dashboard: {absolute_path}", e)
         handler.send_error(404)
 
+def redirect_dashboard(handler, location):
+    handler.send_response(303)
+    handler.send_header("Location", location)
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", "0")
+    handler.end_headers()
+
 class DashboardRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_url = urlparse(self.path)
         if parsed_url.path in ("/", "/index.html"):
-            body = render_dashboard_html().encode("utf-8")
+            query = parse_qs(parsed_url.query)
+            notice = ""
+            if query.get("deleted") == ["1"]:
+                notice = "Đã xóa cảnh báo."
+            elif query.get("deleted") == ["0"]:
+                notice = "Không tìm thấy cảnh báo để xóa."
+
+            body = render_dashboard_html(notice).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -618,6 +679,22 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
 
         self.send_error(404)
+
+    def do_POST(self):
+        parsed_url = urlparse(self.path)
+        if parsed_url.path != "/delete-alert":
+            self.send_error(404)
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            content_length = 0
+
+        body = self.rfile.read(min(content_length, 4096)).decode("utf-8", errors="replace")
+        alert_id = parse_qs(body).get("id", [""])[0]
+        deleted = delete_alert_history_entry(alert_id)
+        redirect_dashboard(self, "/?" + urlencode({"deleted": "1" if deleted else "0"}))
 
     def log_message(self, format, *args):
         return
