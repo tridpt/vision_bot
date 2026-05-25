@@ -364,8 +364,13 @@ def render_dashboard_history(entries):
 
         video_html = ""
         if is_safe_alert_media_path(video_path) and os.path.exists(absolute_from_base(video_path)):
+            video_url = dashboard_media_url(video_path)
             video_html = (
-                f'<video controls preload="metadata" src="{dashboard_media_url(video_path)}"></video>'
+                f'<video controls preload="metadata">'
+                f'<source src="{video_url}" type="video/mp4">'
+                "Trình duyệt không phát được video này."
+                "</video>"
+                f'<a class="media-link" href="{video_url}" target="_blank">Mở/tải video</a>'
             )
 
         cards.append(
@@ -459,6 +464,7 @@ def render_dashboard_html():
     .history {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }}
     .history-meta {{ display: flex; justify-content: space-between; gap: 12px; color: var(--muted); margin-bottom: 8px; }}
     .history-card img, .history-card video {{ width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; border: 1px solid var(--line); background: #000; margin-top: 8px; }}
+    .media-link {{ display: inline-block; margin-top: 8px; color: var(--accent); font-weight: 700; text-decoration: none; }}
     pre {{ white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; color: var(--muted); }}
     .empty {{ padding: 20px; color: var(--muted); }}
     @media (max-width: 860px) {{
@@ -506,6 +512,76 @@ def render_dashboard_html():
 </body>
 </html>"""
 
+def parse_range_header(range_header, file_size):
+    if not range_header or not range_header.startswith("bytes="):
+        return None, False
+
+    range_spec = range_header[len("bytes="):].split(",", 1)[0].strip()
+    if "-" not in range_spec:
+        return None, True
+
+    start_text, end_text = range_spec.split("-", 1)
+    try:
+        if start_text == "":
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return None, True
+            start = max(file_size - suffix_length, 0)
+            end = file_size - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else file_size - 1
+    except ValueError:
+        return None, True
+
+    end = min(end, file_size - 1)
+    if start < 0 or start >= file_size or end < start:
+        return None, True
+    return (start, end), True
+
+def send_dashboard_file(handler, absolute_path, content_type):
+    file_size = os.path.getsize(absolute_path)
+    byte_range, range_requested = parse_range_header(handler.headers.get("Range"), file_size)
+
+    if range_requested and byte_range is None:
+        handler.send_response(416)
+        handler.send_header("Content-Range", f"bytes */{file_size}")
+        handler.send_header("Accept-Ranges", "bytes")
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+        return
+
+    if byte_range is None:
+        start = 0
+        end = file_size - 1
+        status_code = 200
+    else:
+        start, end = byte_range
+        status_code = 206
+
+    content_length = end - start + 1
+    handler.send_response(status_code)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Accept-Ranges", "bytes")
+    handler.send_header("Content-Length", str(content_length))
+    if status_code == 206:
+        handler.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+
+    remaining = content_length
+    with open(absolute_path, "rb") as file:
+        file.seek(start)
+        while remaining > 0:
+            chunk = file.read(min(64 * 1024, remaining))
+            if not chunk:
+                break
+            try:
+                handler.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                break
+            remaining -= len(chunk)
+
 def serve_dashboard_media(handler, query):
     media_path = query.get("path", [""])[0]
     if not is_safe_alert_media_path(media_path):
@@ -518,15 +594,8 @@ def serve_dashboard_media(handler, query):
         return
 
     try:
-        content_length = os.path.getsize(absolute_path)
         content_type = mimetypes.guess_type(absolute_path)[0] or "application/octet-stream"
-        handler.send_response(200)
-        handler.send_header("Content-Type", content_type)
-        handler.send_header("Content-Length", str(content_length))
-        handler.send_header("Cache-Control", "no-store")
-        handler.end_headers()
-        with open(absolute_path, "rb") as file:
-            shutil.copyfileobj(file, handler.wfile)
+        send_dashboard_file(handler, absolute_path, content_type)
     except OSError as e:
         log_error(f"Khong doc duoc media dashboard: {absolute_path}", e)
         handler.send_error(404)
@@ -1044,18 +1113,31 @@ def send_startup_notification():
     except Exception as e:
         log_error("Khong gui duoc startup notification", e)
 
+def create_alert_video_writer(video_path, fps, frame_size):
+    codec_options = (
+        ("avc1", "H.264"),
+        ("H264", "H.264"),
+        ("mp4v", "MP4V")
+    )
+    for fourcc_name, codec_label in codec_options:
+        writer = cv2.VideoWriter(
+            video_path,
+            cv2.VideoWriter_fourcc(*fourcc_name),
+            fps,
+            frame_size
+        )
+        if writer.isOpened():
+            return writer, codec_label
+        writer.release()
+    return None, ""
+
 def record_alert_video(camera_stream, first_frame, video_path, duration_seconds, fps):
     height, width = first_frame.shape[:2]
     width -= width % 2
     height -= height % 2
     frame_size = (width, height)
-    writer = cv2.VideoWriter(
-        video_path,
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        frame_size
-    )
-    if not writer.isOpened():
+    writer, codec_label = create_alert_video_writer(video_path, fps, frame_size)
+    if writer is None:
         return False, "Không tạo được file video"
 
     frames_written = 0
@@ -1084,8 +1166,8 @@ def record_alert_video(camera_stream, first_frame, video_path, duration_seconds,
     if frames_written == 0 or not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
         return False, "Video rỗng hoặc không ghi được frame nào"
     if read_failed:
-        return True, "Camera dừng sớm, đã gửi phần video ghi được"
-    return True, f"Đã ghi clip {duration_seconds} giây"
+        return True, f"Camera dừng sớm, đã gửi phần video ghi được ({codec_label})"
+    return True, f"Đã ghi clip {duration_seconds} giây ({codec_label})"
 
 # --- TÍNH NĂNG ĐẶC BIỆT: LUỒNG CHẠY NGẦM BẮT CHUYỂN ĐỘNG THEO THỜI GIAN THỰC ---
 def motion_detection_loop():
