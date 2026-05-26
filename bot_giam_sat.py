@@ -21,7 +21,7 @@ from vision_bot_core.alert_history_store import (
     text_preview,
     trim_alert_history as trim_alert_history_unprotected,
 )
-from vision_bot_core.backup_store import backup_json_files
+from vision_bot_core.backup_store import backup_json_files, list_backups
 from vision_bot_core.camera_tools import (
     read_camera_frame,
     save_frame,
@@ -378,6 +378,9 @@ def send_startup_notification():
 def build_status_message():
     return format_status_message(create_status_report_context())
 
+def get_recent_backups(limit=5):
+    return list_backups(BACKUP_DIR, limit=limit, log_error=log_error)
+
 def create_telegram_handler_context():
     return TelegramHandlerContext(
         bot=bot,
@@ -388,6 +391,9 @@ def create_telegram_handler_context():
         clear_alert_history_files=clear_alert_history_files,
         set_radar_state=motion_monitor.set_radar_state,
         build_status_message=build_status_message,
+        list_backups=get_recent_backups,
+        format_timestamp=format_timestamp,
+        format_size=format_size,
         send_alert_history=send_alert_history,
         capture_and_analyze_environment=capture_and_analyze_environment,
         schedule_bot_restart=schedule_bot_restart,

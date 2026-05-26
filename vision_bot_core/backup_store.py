@@ -67,3 +67,63 @@ def backup_json_files(file_specs, backup_dir, reason, max_backups=DEFAULT_MAX_BA
 
     prune_backups(backup_dir, max_backups=max_backups, log_error=log_error)
     return backup_paths
+
+
+def parse_backup_filename(filename):
+    stem, extension = os.path.splitext(filename)
+    if extension.lower() != ".json":
+        return None
+
+    parts = stem.rsplit("_", 3)
+    if len(parts) != 4:
+        return None
+
+    name_part, date_part, time_part, _ = parts
+    if len(date_part) != 8 or len(time_part) != 6:
+        return None
+
+    if name_part.startswith("alert_history_"):
+        label = "alert_history"
+        reason = name_part[len("alert_history_"):]
+    elif name_part.startswith("settings_"):
+        label = "settings"
+        reason = name_part[len("settings_"):]
+    else:
+        label, _, reason = name_part.partition("_")
+        if not reason:
+            reason = "unknown"
+
+    return {
+        "label": label,
+        "reason": reason,
+        "timestamp": f"{date_part}_{time_part}",
+    }
+
+
+def list_backups(backup_dir, limit=5, log_error=None):
+    if not os.path.isdir(backup_dir):
+        return []
+
+    try:
+        entries = []
+        for name in os.listdir(backup_dir):
+            path = os.path.join(backup_dir, name)
+            if not os.path.isfile(path) or not name.endswith(".json"):
+                continue
+
+            parsed = parse_backup_filename(name) or {}
+            entries.append({
+                "filename": name,
+                "path": path,
+                "label": parsed.get("label", "unknown"),
+                "reason": parsed.get("reason", "unknown"),
+                "created_at": os.path.getmtime(path),
+                "size": os.path.getsize(path),
+            })
+
+        entries.sort(key=lambda entry: (entry["created_at"], entry["filename"]), reverse=True)
+        return entries[:limit]
+    except OSError as e:
+        if log_error is not None:
+            log_error(f"Khong doc duoc danh sach backup: {backup_dir}", e)
+        return []

@@ -21,6 +21,27 @@ def format_error_log_message(log_text):
     return f"🧯 LOG LỖI GẦN NHẤT\n\n```text\n{safe_log_text}\n```"
 
 
+def format_backup_list_message(backups, format_timestamp, format_size):
+    if not backups:
+        return "💾 BACKUP GẦN NHẤT\n\nChưa có backup nào trong logs/backups."
+
+    lines = ["💾 BACKUP GẦN NHẤT"]
+    for index, backup in enumerate(backups, start=1):
+        label = str(backup.get("label", "unknown")).replace("_", " ")
+        reason = str(backup.get("reason", "unknown")).replace("_", " ")
+        created_at = format_timestamp(backup.get("created_at"))
+        size = format_size(backup.get("size", 0))
+        filename = backup.get("filename", "")
+        lines.append(
+            f"\n{index}. {label}\n"
+            f"Lý do: {reason}\n"
+            f"Thời gian: {created_at}\n"
+            f"Dung lượng: {size}\n"
+            f"File: {filename}"
+        )
+    return "\n".join(lines)
+
+
 def format_alert_history_message(entries, format_timestamp):
     if not entries:
         return "🧾 LỊCH SỬ CẢNH BÁO\n\nChưa có cảnh báo nào được ghi lại."
@@ -85,9 +106,10 @@ def build_main_menu():
         telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings")
     )
     keyboard.add(
-        telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm"),
+        telebot.types.InlineKeyboardButton("💾 Xem backup", callback_data="menu:backups"),
         telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm")
     )
+    keyboard.add(telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm"))
     return keyboard
 
 

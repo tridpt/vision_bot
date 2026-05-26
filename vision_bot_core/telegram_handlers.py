@@ -15,6 +15,7 @@ from .telegram_ui import (
     build_restart_confirm_menu,
     build_setting_prompt,
     build_settings_menu,
+    format_backup_list_message,
     format_error_log_message,
     format_settings_message,
     on_off_label,
@@ -31,6 +32,9 @@ class TelegramHandlerContext:
     clear_alert_history_files: object
     set_radar_state: object
     build_status_message: object
+    list_backups: object
+    format_timestamp: object
+    format_size: object
     send_alert_history: object
     capture_and_analyze_environment: object
     schedule_bot_restart: object
@@ -320,6 +324,15 @@ def register_telegram_handlers(ctx):
         if call.data == "menu:error_log":
             bot.answer_callback_query(call.id, "Đang đọc log lỗi")
             bot.send_message(call.message.chat.id, format_error_log_message(ctx.tail_error_log()), parse_mode="Markdown")
+            return
+
+        if call.data == "menu:backups":
+            bot.answer_callback_query(call.id, "Đang đọc backup")
+            backups = ctx.list_backups()
+            bot.send_message(
+                call.message.chat.id,
+                format_backup_list_message(backups, ctx.format_timestamp, ctx.format_size)
+            )
             return
 
         if call.data == "menu:restart_confirm":

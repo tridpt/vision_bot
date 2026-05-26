@@ -15,6 +15,13 @@ class TelegramUiTests(unittest.TestCase):
 
     def test_build_menus_return_inline_keyboards(self):
         self.assertTrue(telegram_ui.build_main_menu().keyboard)
+        backup_buttons = [
+            button
+            for row in telegram_ui.build_main_menu().keyboard
+            for button in row
+            if button.callback_data == "menu:backups"
+        ]
+        self.assertEqual(len(backup_buttons), 1)
         self.assertTrue(telegram_ui.build_settings_menu().keyboard)
         self.assertTrue(telegram_ui.build_restart_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_clear_history_confirm_menu().keyboard)
@@ -25,6 +32,11 @@ class TelegramUiTests(unittest.TestCase):
         self.assertIn("Video:", telegram_ui.format_alert_history_message(
             [{"timestamp": 1, "video_status": "ok", "analysis": "motion"}],
             lambda timestamp: f"time-{timestamp}",
+        ))
+        self.assertIn("BACKUP", telegram_ui.format_backup_list_message(
+            [{"label": "settings", "reason": "before_setting", "created_at": 1, "size": 12, "filename": "settings.json"}],
+            lambda timestamp: f"time-{timestamp}",
+            lambda size: f"{size} B",
         ))
         self.assertIn("8000", telegram_ui.build_setting_prompt("motion_area_threshold"))
 

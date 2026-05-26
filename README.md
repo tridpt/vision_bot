@@ -129,6 +129,7 @@ Trong `/menu` có các nút chính:
 - `Lịch sử`: gửi cảnh báo gần nhất.
 - `Xem log lỗi`: đọc các dòng lỗi mới nhất từ `logs/bot_errors.log`.
 - `Cài đặt`: chỉnh setting bằng nút hoặc nhập số trong chat.
+- `Xem backup`: liệt kê vài backup JSON gần nhất.
 - `Restart bot`: restart process bot.
 - `Dọn lịch sử`: xóa ảnh/video cảnh báo và `alert_history.json`.
 

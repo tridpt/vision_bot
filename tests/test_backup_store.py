@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vision_bot_core.backup_store import backup_json_files, prune_backups, safe_name_part
+from vision_bot_core.backup_store import backup_json_files, list_backups, prune_backups, safe_name_part
 
 
 class BackupStoreTests(unittest.TestCase):
@@ -45,6 +45,23 @@ class BackupStoreTests(unittest.TestCase):
     def test_safe_name_part_removes_path_unsafe_characters(self):
         self.assertEqual(safe_name_part("Before Setting: cooldown/sec"), "before_setting__cooldown_sec")
         self.assertEqual(safe_name_part(""), "backup")
+
+    def test_list_backups_returns_newest_entries_first(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            backup_dir = root / "backups"
+            source = root / "settings.json"
+            source.write_text("{}", encoding="utf-8")
+
+            backup_json_files([("settings", str(source))], str(backup_dir), reason="first", max_backups=10)
+            backup_json_files([("settings", str(source))], str(backup_dir), reason="second", max_backups=10)
+
+            backups = list_backups(str(backup_dir), limit=1)
+
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0]["label"], "settings")
+            self.assertEqual(backups[0]["reason"], "second")
+            self.assertTrue(backups[0]["filename"].endswith(".json"))
 
 
 if __name__ == "__main__":
