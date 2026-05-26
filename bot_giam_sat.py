@@ -6,7 +6,6 @@ import subprocess
 import threading
 import time
 from logging.handlers import RotatingFileHandler
-from PIL import Image
 from alert_history_store import (
     absolute_from_base,
     add_alert_history,
@@ -34,6 +33,7 @@ from camera_tools import (
     warm_up_camera,
 )
 from dashboard_server import DashboardContext, start_dashboard_server
+from gemini_analyzer import ask_ai, configure_gemini_analyzer
 from settings_store import (
     HISTORY_LIMIT_CHOICES,
     SETTING_EXAMPLES,
@@ -46,7 +46,6 @@ from settings_store import (
     get_settings_snapshot,
     update_setting,
 )
-from google import genai
 from dotenv import load_dotenv
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
@@ -103,6 +102,7 @@ DASHBOARD_PORT = env_int("DASHBOARD_PORT", 8765)
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
 HISTORY_PREVIEW_LIMIT = 3
 configure_settings_store(SETTINGS_FILE)
+configure_gemini_analyzer(GEMINI_API_KEY)
 
 def setup_error_logging():
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -155,7 +155,6 @@ def schedule_bot_restart():
 
 # Khởi tạo kết nối
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Tự động ghim Menu Lệnh lên màn hình chat Telegram
 bot.set_my_commands([
@@ -445,15 +444,6 @@ def edit_menu_message(call, text, reply_markup=None):
     except Exception as e:
         log_error("Khong edit duoc menu message, fallback sang send_message", e)
         bot.send_message(call.message.chat.id, text, reply_markup=reply_markup)
-
-def ask_ai(image_path, user_question):
-    img = Image.open(image_path)
-    prompt = f"Bạn là bộ não an ninh. Chủ vừa yêu cầu: '{user_question}'. \n Hãy quan sát tỷ mỉ ảnh camera trực tiếp này và trả lời cực kỳ ngắn gọn, khách quan."
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=[prompt, img]
-    )
-    return response.text
 
 def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
     global auto_mode_active
