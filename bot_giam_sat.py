@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from logging.handlers import RotatingFileHandler
-from alert_history_store import (
+from vision_bot_core.alert_history_store import (
     absolute_from_base,
     add_alert_history,
     clear_alert_history_files,
@@ -22,7 +22,7 @@ from alert_history_store import (
     text_preview,
     trim_alert_history,
 )
-from camera_tools import (
+from vision_bot_core.camera_tools import (
     build_motion_gray,
     check_camera_once,
     has_large_motion,
@@ -32,9 +32,9 @@ from camera_tools import (
     save_frame,
     warm_up_camera,
 )
-from dashboard_server import DashboardContext, start_dashboard_server
-from gemini_analyzer import ask_ai, configure_gemini_analyzer
-from settings_store import (
+from vision_bot_core.dashboard_server import DashboardContext, start_dashboard_server
+from vision_bot_core.gemini_analyzer import ask_ai, configure_gemini_analyzer
+from vision_bot_core.settings_store import (
     HISTORY_LIMIT_CHOICES,
     SETTING_LABELS,
     SETTING_LIMITS,
@@ -45,7 +45,7 @@ from settings_store import (
     get_settings_snapshot,
     update_setting,
 )
-from telegram_ui import (
+from vision_bot_core.telegram_ui import (
     build_clear_history_confirm_menu,
     build_main_menu,
     build_restart_confirm_menu,

@@ -1,7 +1,7 @@
 import telebot
 
-from alert_history_store import text_preview
-from settings_store import (
+from .alert_history_store import text_preview
+from .settings_store import (
     HISTORY_LIMIT_CHOICES,
     SETTING_EXAMPLES,
     SETTING_LABELS,

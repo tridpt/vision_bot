@@ -38,7 +38,7 @@ def analyze_image():
         print("="*50)
         
     except FileNotFoundError:
-        print(f"❌ Không tìm thấy file '{ten_anh}'. Hãy chắc chắn bạn đã chạy file chup_anh.py trước đó nhé.")
+        print(f"❌ Không tìm thấy file '{ten_anh}'. Hãy chắc chắn bạn đã chạy tools/chup_anh.py trước đó nhé.")
     except Exception as e:
         print(f"❌ Đã gặp lỗi: {e}")
 
