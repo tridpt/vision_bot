@@ -2,15 +2,41 @@ import telebot
 import cv2
 import sys
 import os
-import json
 import logging
-import shutil
 import subprocess
 import threading
 import time
 from logging.handlers import RotatingFileHandler
 from PIL import Image
+from alert_history_store import (
+    absolute_from_base,
+    add_alert_history,
+    clear_alert_history_files,
+    configure_alert_history_store,
+    delete_alert_history_entry,
+    ensure_log_dir,
+    get_alert_history_count,
+    get_alert_history_snapshot,
+    get_recent_alert_history,
+    is_safe_alert_media_path,
+    make_alert_id,
+    relative_to_base,
+    text_preview,
+    trim_alert_history,
+)
 from dashboard_server import DashboardContext, start_dashboard_server
+from settings_store import (
+    HISTORY_LIMIT_CHOICES,
+    SETTING_EXAMPLES,
+    SETTING_LABELS,
+    SETTING_LIMITS,
+    SETTING_UNITS,
+    clamp_int,
+    configure_settings_store,
+    get_setting,
+    get_settings_snapshot,
+    update_setting,
+)
 from google import genai
 from dotenv import load_dotenv
 
@@ -67,24 +93,7 @@ DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = env_int("DASHBOARD_PORT", 8765)
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
 HISTORY_PREVIEW_LIMIT = 3
-HISTORY_LIMIT_CHOICES = (10, 50, 100)
-DEFAULT_SETTINGS = {
-    "motion_area_threshold": 8000,
-    "alert_cooldown_seconds": 10,
-    "alert_video_seconds": 7,
-    "alert_video_fps": 10,
-    "send_video": True,
-    "use_gemini_analysis": True,
-    "alert_history_limit": 50
-}
-
-SETTING_LIMITS = {
-    "motion_area_threshold": (500, 50000),
-    "alert_cooldown_seconds": (3, 3600),
-    "alert_video_seconds": (5, 10),
-    "alert_video_fps": (5, 30),
-    "alert_history_limit": (10, 100)
-}
+configure_settings_store(SETTINGS_FILE)
 
 def setup_error_logging():
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -110,6 +119,14 @@ def log_error(context, error=None):
         error_logger.error(context)
     else:
         error_logger.exception("%s: %s", context, error)
+
+configure_alert_history_store(
+    base_dir=BASE_DIR,
+    log_dir=LOG_DIR,
+    alert_history_file=ALERT_HISTORY_FILE,
+    get_history_limit=lambda: get_setting("alert_history_limit"),
+    log_error=log_error
+)
 
 def schedule_bot_restart():
     restart_script = os.path.join(BASE_DIR, "Chay_Bot_Ngam.vbs")
@@ -147,186 +164,8 @@ last_gray_frame = None
 camera_online = False
 last_camera_status = "Chưa kiểm tra camera"
 last_alert_timestamp = None
-settings_lock = threading.Lock()
 pending_setting_inputs = {}
 pending_setting_lock = threading.Lock()
-history_lock = threading.Lock()
-
-SETTING_LABELS = {
-    "motion_area_threshold": "độ nhạy chuyển động",
-    "alert_cooldown_seconds": "cooldown cảnh báo",
-    "alert_video_seconds": "độ dài video",
-    "alert_video_fps": "FPS video",
-    "alert_history_limit": "số cảnh báo giữ trong lịch sử"
-}
-
-SETTING_UNITS = {
-    "motion_area_threshold": "",
-    "alert_cooldown_seconds": " giây",
-    "alert_video_seconds": " giây",
-    "alert_video_fps": "",
-    "alert_history_limit": " cảnh báo"
-}
-
-SETTING_EXAMPLES = {
-    "motion_area_threshold": "8000",
-    "alert_cooldown_seconds": "20",
-    "alert_video_seconds": "7",
-    "alert_video_fps": "10",
-    "alert_history_limit": "50"
-}
-
-def clamp_int(value, default, min_value, max_value):
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        number = default
-    return max(min_value, min(number, max_value))
-
-def normalize_bool(value, default):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on", "bat", "bật")
-    if value in (0, 1):
-        return bool(value)
-    return default
-
-def normalize_settings(raw_settings):
-    normalized = DEFAULT_SETTINGS.copy()
-    if isinstance(raw_settings, dict):
-        normalized.update({key: raw_settings[key] for key in DEFAULT_SETTINGS if key in raw_settings})
-
-    for key, (min_value, max_value) in SETTING_LIMITS.items():
-        normalized[key] = clamp_int(normalized[key], DEFAULT_SETTINGS[key], min_value, max_value)
-
-    if normalized["alert_history_limit"] not in HISTORY_LIMIT_CHOICES:
-        normalized["alert_history_limit"] = min(
-            HISTORY_LIMIT_CHOICES,
-            key=lambda choice: abs(choice - normalized["alert_history_limit"])
-        )
-
-    normalized["send_video"] = normalize_bool(
-        normalized["send_video"],
-        DEFAULT_SETTINGS["send_video"]
-    )
-    normalized["use_gemini_analysis"] = normalize_bool(
-        normalized["use_gemini_analysis"],
-        DEFAULT_SETTINGS["use_gemini_analysis"]
-    )
-    return normalized
-
-def load_settings():
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as file:
-            return normalize_settings(json.load(file))
-    except FileNotFoundError:
-        return DEFAULT_SETTINGS.copy()
-    except (json.JSONDecodeError, OSError):
-        return DEFAULT_SETTINGS.copy()
-
-def save_settings(settings_to_save):
-    temp_file = f"{SETTINGS_FILE}.tmp"
-    with open(temp_file, "w", encoding="utf-8") as file:
-        json.dump(settings_to_save, file, ensure_ascii=False, indent=2)
-    os.replace(temp_file, SETTINGS_FILE)
-
-settings = load_settings()
-
-def get_setting(name):
-    with settings_lock:
-        return settings[name]
-
-def get_settings_snapshot():
-    with settings_lock:
-        return settings.copy()
-
-def update_setting(name, value):
-    with settings_lock:
-        settings[name] = value
-        save_settings(settings.copy())
-
-def ensure_log_dir():
-    os.makedirs(LOG_DIR, exist_ok=True)
-
-def make_alert_id(timestamp):
-    time_part = time.strftime("%Y%m%d_%H%M%S", time.localtime(timestamp))
-    millis = int((timestamp - int(timestamp)) * 1000)
-    return f"{time_part}_{millis:03d}"
-
-def relative_to_base(path):
-    return os.path.relpath(path, BASE_DIR)
-
-def absolute_from_base(path):
-    if not path:
-        return None
-    if os.path.isabs(path):
-        return path
-    return os.path.join(BASE_DIR, path)
-
-def load_alert_history_unlocked():
-    try:
-        with open(ALERT_HISTORY_FILE, "r", encoding="utf-8") as file:
-            history = json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
-    if not isinstance(history, list):
-        return []
-    return [entry for entry in history if isinstance(entry, dict)]
-
-def save_alert_history_unlocked(history):
-    ensure_log_dir()
-    temp_file = f"{ALERT_HISTORY_FILE}.tmp"
-    with open(temp_file, "w", encoding="utf-8") as file:
-        json.dump(history, file, ensure_ascii=False, indent=2)
-    os.replace(temp_file, ALERT_HISTORY_FILE)
-
-def is_safe_alert_media_path(path):
-    if not path:
-        return False
-    log_dir = os.path.abspath(LOG_DIR)
-    absolute_path = os.path.abspath(absolute_from_base(path))
-    if os.path.commonpath([log_dir, absolute_path]) != log_dir:
-        return False
-    return os.path.basename(absolute_path).startswith("alert_")
-
-def delete_alert_media_file(path):
-    if not is_safe_alert_media_path(path):
-        return
-    absolute_path = os.path.abspath(absolute_from_base(path))
-    try:
-        if os.path.isfile(absolute_path):
-            os.remove(absolute_path)
-    except OSError as e:
-        log_error(f"Khong xoa duoc file canh bao cu: {absolute_path}", e)
-
-def delete_alert_media_for_entries(entries):
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        delete_alert_media_file(entry.get("image_path"))
-        delete_alert_media_file(entry.get("video_path"))
-
-def delete_alert_history_entry(alert_id):
-    if not alert_id:
-        return False
-
-    with history_lock:
-        history = load_alert_history_unlocked()
-        kept_history = []
-        removed_history = []
-        for entry in history:
-            if str(entry.get("id", "")) == str(alert_id):
-                removed_history.append(entry)
-            else:
-                kept_history.append(entry)
-
-        if not removed_history:
-            return False
-
-        save_alert_history_unlocked(kept_history)
-        delete_alert_media_for_entries(removed_history)
-        return True
 
 def tail_error_log(max_lines=20):
     if not os.path.exists(ERROR_LOG_FILE):
@@ -352,69 +191,6 @@ def tail_error_log(max_lines=20):
 def format_error_log_message():
     log_text = tail_error_log().replace("```", "` ` `")
     return f"🧯 LOG LỖI GẦN NHẤT\n\n```text\n{log_text}\n```"
-
-def add_alert_history(entry):
-    with history_lock:
-        history = load_alert_history_unlocked()
-        history.insert(0, entry)
-        limit = get_setting("alert_history_limit")
-        kept_history = history[:limit]
-        removed_history = history[limit:]
-        save_alert_history_unlocked(kept_history)
-        delete_alert_media_for_entries(removed_history)
-
-def get_recent_alert_history(limit=HISTORY_PREVIEW_LIMIT):
-    with history_lock:
-        return load_alert_history_unlocked()[:limit]
-
-def get_alert_history_snapshot(limit=None):
-    with history_lock:
-        history = load_alert_history_unlocked()
-    if limit is None:
-        return history
-    return history[:limit]
-
-def get_alert_history_count():
-    with history_lock:
-        return len(load_alert_history_unlocked())
-
-def trim_alert_history(limit):
-    with history_lock:
-        history = load_alert_history_unlocked()
-        kept_history = history[:limit]
-        removed_history = history[limit:]
-        save_alert_history_unlocked(kept_history)
-        delete_alert_media_for_entries(removed_history)
-
-def clear_alert_history_files():
-    log_dir = os.path.abspath(LOG_DIR)
-    base_dir = os.path.abspath(BASE_DIR)
-    if os.path.basename(log_dir).lower() != "logs" or os.path.commonpath([base_dir, log_dir]) != base_dir:
-        raise RuntimeError("Duong dan logs khong hop le, da huy thao tac xoa.")
-
-    with history_lock:
-        ensure_log_dir()
-        for name in os.listdir(log_dir):
-            path = os.path.join(log_dir, name)
-            should_delete = (
-                name.startswith("alert_")
-                or name in ("alert_history.json", "alert_history.json.tmp")
-            )
-            if not should_delete:
-                continue
-            if os.path.isdir(path):
-                shutil.rmtree(path)
-            else:
-                os.remove(path)
-        save_alert_history_unlocked([])
-
-def text_preview(text, max_length=140):
-    if not text:
-        return "Không có phân tích"
-    compact = " ".join(str(text).split())
-    if len(compact) <= max_length:
-        return compact
-    return f"{compact[:max_length - 3]}..."
 
 def format_alert_history_message(entries):
     if not entries:

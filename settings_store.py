@@ -1,0 +1,145 @@
+import json
+import os
+import threading
+
+
+HISTORY_LIMIT_CHOICES = (10, 50, 100)
+
+DEFAULT_SETTINGS = {
+    "motion_area_threshold": 8000,
+    "alert_cooldown_seconds": 10,
+    "alert_video_seconds": 7,
+    "alert_video_fps": 10,
+    "send_video": True,
+    "use_gemini_analysis": True,
+    "alert_history_limit": 50
+}
+
+SETTING_LIMITS = {
+    "motion_area_threshold": (500, 50000),
+    "alert_cooldown_seconds": (3, 3600),
+    "alert_video_seconds": (5, 10),
+    "alert_video_fps": (5, 30),
+    "alert_history_limit": (10, 100)
+}
+
+SETTING_LABELS = {
+    "motion_area_threshold": "độ nhạy chuyển động",
+    "alert_cooldown_seconds": "cooldown cảnh báo",
+    "alert_video_seconds": "độ dài video",
+    "alert_video_fps": "FPS video",
+    "alert_history_limit": "số cảnh báo giữ trong lịch sử"
+}
+
+SETTING_UNITS = {
+    "motion_area_threshold": "",
+    "alert_cooldown_seconds": " giây",
+    "alert_video_seconds": " giây",
+    "alert_video_fps": "",
+    "alert_history_limit": " cảnh báo"
+}
+
+SETTING_EXAMPLES = {
+    "motion_area_threshold": "8000",
+    "alert_cooldown_seconds": "20",
+    "alert_video_seconds": "7",
+    "alert_video_fps": "10",
+    "alert_history_limit": "50"
+}
+
+_settings_file = None
+_settings_lock = threading.Lock()
+_settings = DEFAULT_SETTINGS.copy()
+
+
+def configure_settings_store(settings_path):
+    global _settings_file, _settings
+    _settings_file = settings_path
+    with _settings_lock:
+        _settings = load_settings()
+
+
+def clamp_int(value, default, min_value, max_value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(min_value, min(number, max_value))
+
+
+def normalize_bool(value, default):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on", "bat", "bật")
+    if value in (0, 1):
+        return bool(value)
+    return default
+
+
+def normalize_settings(raw_settings):
+    normalized = DEFAULT_SETTINGS.copy()
+    if isinstance(raw_settings, dict):
+        normalized.update({key: raw_settings[key] for key in DEFAULT_SETTINGS if key in raw_settings})
+
+    for key, (min_value, max_value) in SETTING_LIMITS.items():
+        normalized[key] = clamp_int(normalized[key], DEFAULT_SETTINGS[key], min_value, max_value)
+
+    if normalized["alert_history_limit"] not in HISTORY_LIMIT_CHOICES:
+        normalized["alert_history_limit"] = min(
+            HISTORY_LIMIT_CHOICES,
+            key=lambda choice: abs(choice - normalized["alert_history_limit"])
+        )
+
+    normalized["send_video"] = normalize_bool(
+        normalized["send_video"],
+        DEFAULT_SETTINGS["send_video"]
+    )
+    normalized["use_gemini_analysis"] = normalize_bool(
+        normalized["use_gemini_analysis"],
+        DEFAULT_SETTINGS["use_gemini_analysis"]
+    )
+    return normalized
+
+
+def load_settings():
+    if _settings_file is None:
+        return DEFAULT_SETTINGS.copy()
+
+    try:
+        with open(_settings_file, "r", encoding="utf-8") as file:
+            return normalize_settings(json.load(file))
+    except FileNotFoundError:
+        return DEFAULT_SETTINGS.copy()
+    except (json.JSONDecodeError, OSError):
+        return DEFAULT_SETTINGS.copy()
+
+
+def save_settings(settings_to_save):
+    if _settings_file is None:
+        raise RuntimeError("Settings store has not been configured.")
+
+    settings_dir = os.path.dirname(_settings_file)
+    if settings_dir:
+        os.makedirs(settings_dir, exist_ok=True)
+
+    temp_file = f"{_settings_file}.tmp"
+    with open(temp_file, "w", encoding="utf-8") as file:
+        json.dump(settings_to_save, file, ensure_ascii=False, indent=2)
+    os.replace(temp_file, _settings_file)
+
+
+def get_setting(name):
+    with _settings_lock:
+        return _settings[name]
+
+
+def get_settings_snapshot():
+    with _settings_lock:
+        return _settings.copy()
+
+
+def update_setting(name, value):
+    with _settings_lock:
+        _settings[name] = value
+        save_settings(_settings.copy())
