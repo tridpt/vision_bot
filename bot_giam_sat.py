@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from vision_bot_core.alert_history_store import (
     absolute_from_base,
     add_alert_history,
-    clear_alert_history_files,
+    clear_alert_history_files as clear_alert_history_files_unprotected,
     configure_alert_history_store,
     delete_alert_history_entry,
     ensure_log_dir,
@@ -20,8 +20,9 @@ from vision_bot_core.alert_history_store import (
     make_alert_id,
     relative_to_base,
     text_preview,
-    trim_alert_history,
+    trim_alert_history as trim_alert_history_unprotected,
 )
+from vision_bot_core.backup_store import backup_json_files
 from vision_bot_core.camera_tools import (
     build_motion_gray,
     check_camera_once,
@@ -43,7 +44,14 @@ from vision_bot_core.settings_store import (
     configure_settings_store,
     get_setting,
     get_settings_snapshot,
-    update_setting,
+    update_setting as save_setting,
+)
+from vision_bot_core.status_report import (
+    StatusReportContext,
+    format_duration,
+    format_size,
+    format_status_message,
+    get_directory_size,
 )
 from vision_bot_core.telegram_ui import (
     build_clear_history_confirm_menu,
@@ -108,10 +116,12 @@ SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 ALERT_HISTORY_FILE = os.path.join(LOG_DIR, "alert_history.json")
 ERROR_LOG_FILE = os.path.join(LOG_DIR, "bot_errors.log")
+BACKUP_DIR = os.path.join(LOG_DIR, "backups")
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = env_int("DASHBOARD_PORT", 8765)
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
 HISTORY_PREVIEW_LIMIT = 3
+BACKUP_MAX_FILES = env_int("BACKUP_MAX_FILES", 30)
 configure_settings_store(SETTINGS_FILE)
 configure_gemini_analyzer(GEMINI_API_KEY)
 
@@ -139,6 +149,33 @@ def log_error(context, error=None):
         error_logger.error(context)
     else:
         error_logger.exception("%s: %s", context, error)
+
+def backup_runtime_state(reason, include_settings=True, include_history=True):
+    file_specs = []
+    if include_settings:
+        file_specs.append(("settings", SETTINGS_FILE))
+    if include_history:
+        file_specs.append(("alert_history", ALERT_HISTORY_FILE))
+
+    return backup_json_files(
+        file_specs,
+        BACKUP_DIR,
+        reason=reason,
+        max_backups=BACKUP_MAX_FILES,
+        log_error=log_error
+    )
+
+def update_setting(name, value):
+    backup_runtime_state(f"before_setting_{name}", include_settings=True, include_history=False)
+    save_setting(name, value)
+
+def trim_alert_history(limit):
+    backup_runtime_state(f"before_trim_history_{limit}", include_settings=False, include_history=True)
+    trim_alert_history_unprotected(limit)
+
+def clear_alert_history_files():
+    backup_runtime_state("before_clear_history", include_settings=False, include_history=True)
+    clear_alert_history_files_unprotected()
 
 configure_alert_history_store(
     base_dir=BASE_DIR,
@@ -406,6 +443,21 @@ def is_radar_active():
 def get_last_alert_timestamp():
     return last_alert_timestamp
 
+def create_status_report_context():
+    return StatusReportContext(
+        bot_start_time=BOT_START_TIME,
+        dashboard_url=DASHBOARD_URL,
+        log_dir=LOG_DIR,
+        get_camera_status=get_camera_status_for_report,
+        is_radar_active=is_radar_active,
+        get_last_alert_timestamp=get_last_alert_timestamp,
+        get_alert_history_count=get_alert_history_count,
+        get_settings_snapshot=get_settings_snapshot,
+        format_timestamp=format_timestamp,
+        format_settings_snapshot=format_settings_snapshot,
+        log_error=log_error
+    )
+
 def create_dashboard_context():
     return DashboardContext(
         host=DASHBOARD_HOST,
@@ -422,7 +474,7 @@ def create_dashboard_context():
         get_camera_status=get_camera_status_for_dashboard,
         is_radar_active=is_radar_active,
         format_size=format_size,
-        get_directory_size=get_directory_size,
+        get_directory_size=lambda path: get_directory_size(path, log_error=log_error),
         format_duration=format_duration,
         tail_error_log=tail_error_log,
         format_timestamp=format_timestamp,
@@ -435,69 +487,6 @@ def create_dashboard_context():
         trim_alert_history=trim_alert_history,
         clamp_int=clamp_int,
         log_error=log_error
-    )
-
-def format_duration(seconds):
-    seconds = max(0, int(seconds))
-    days, remainder = divmod(seconds, 86400)
-    hours, remainder = divmod(remainder, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    parts = []
-    if days:
-        parts.append(f"{days} ngày")
-    if hours:
-        parts.append(f"{hours} giờ")
-    if minutes:
-        parts.append(f"{minutes} phút")
-    if seconds or not parts:
-        parts.append(f"{seconds} giây")
-    return " ".join(parts)
-
-def get_directory_size(path):
-    total_size = 0
-    if not os.path.isdir(path):
-        return 0
-
-    for root, _, files in os.walk(path):
-        for filename in files:
-            file_path = os.path.join(root, filename)
-            try:
-                total_size += os.path.getsize(file_path)
-            except OSError as e:
-                log_error(f"Khong doc duoc dung luong file log: {file_path}", e)
-    return total_size
-
-def format_size(num_bytes):
-    size = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            if unit == "B":
-                return f"{int(size)} {unit}"
-            return f"{size:.1f} {unit}"
-        size /= 1024
-
-def format_status_message():
-    camera_ok, camera_status = get_camera_status_for_report()
-    radar_status = "BẬT" if auto_mode_active else "TẮT"
-    camera_icon = "✅" if camera_ok else "❌"
-    alert_time = format_timestamp(last_alert_timestamp)
-    uptime = format_duration(time.time() - BOT_START_TIME)
-    alert_count = get_alert_history_count()
-    logs_size = format_size(get_directory_size(LOG_DIR))
-    settings_snapshot = get_settings_snapshot()
-
-    return (
-        "📡 TRẠNG THÁI VISION BOT\n\n"
-        "✅ Bot: Đang chạy và nhận lệnh Telegram\n"
-        f"📍 Radar: {radar_status}\n"
-        f"{camera_icon} Camera: {camera_status}\n"
-        f"🚨 Lần cảnh báo gần nhất: {alert_time}\n"
-        f"🧾 Cảnh báo trong lịch sử: {alert_count}/{settings_snapshot['alert_history_limit']}\n"
-        f"💾 Dung lượng logs: {logs_size}\n"
-        f"⏳ Uptime: {uptime}\n"
-        f"🌐 Dashboard local: {DASHBOARD_URL}\n"
-        f"⚙️ Setting: {format_settings_snapshot(settings_snapshot)}"
     )
 
 def send_startup_notification():
@@ -732,7 +721,7 @@ def turn_off_auto(message):
 def send_status(message):
     if not verify_user(message): return
     clear_pending_setting_input(message)
-    bot.reply_to(message, format_status_message())
+    bot.reply_to(message, format_status_message(create_status_report_context()))
 
 @bot.message_handler(commands=['history'])
 def send_history(message):
@@ -833,7 +822,7 @@ def handle_menu_callback(call):
 
     if call.data == "menu:status":
         bot.answer_callback_query(call.id)
-        edit_menu_message(call, format_status_message(), build_main_menu())
+        edit_menu_message(call, format_status_message(create_status_report_context()), build_main_menu())
         return
 
     if call.data == "menu:capture":

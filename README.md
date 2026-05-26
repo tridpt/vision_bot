@@ -29,8 +29,10 @@ vision_bot/
 │  ├─ dashboard_server.py
 │  ├─ settings_store.py
 │  ├─ alert_history_store.py
+│  ├─ backup_store.py
 │  ├─ camera_tools.py
 │  ├─ gemini_analyzer.py
+│  ├─ status_report.py
 │  └─ telegram_ui.py
 └─ tools/                       # Script thử nghiệm độc lập
    ├─ chup_anh.py
@@ -66,6 +68,7 @@ Ghi chú:
 - `GEMINI_API_KEY`: lấy từ Google AI Studio.
 - `ALLOWED_USER_ID`: Telegram user id của bạn, có thể lấy bằng bot `@userinfobot`.
 - Có thể thêm `DASHBOARD_PORT=8765` nếu muốn đổi port dashboard.
+- Có thể thêm `BACKUP_MAX_FILES=30` nếu muốn đổi số file backup JSON được giữ lại.
 
 ## Cách chạy
 
@@ -162,8 +165,13 @@ Thư mục `logs/` chứa:
 - `alert_*.jpg`: ảnh cảnh báo.
 - `alert_*.mp4`: video cảnh báo.
 - `bot_errors.log`: lỗi nội bộ của bot.
+- `backups/`: backup nhỏ của `settings.json` và `alert_history.json`.
 
 Khi lịch sử vượt giới hạn setting, bot sẽ xóa record cũ và xóa luôn ảnh/video tương ứng. Nếu muốn dọn toàn bộ, dùng nút `Dọn lịch sử` trong Telegram hoặc dashboard.
+
+Trước khi đổi setting, cắt lịch sử hoặc dọn toàn bộ lịch sử, bot tự lưu backup JSON vào `logs/backups/`. Backup này chỉ lưu file cấu hình/lịch sử để nhẹ ổ cứng, không copy lại ảnh/video cảnh báo.
+
+Khôi phục thủ công: tắt bot, copy file `settings_*.json` cần khôi phục thành `settings.json` hoặc copy file `alert_history_*.json` thành `logs/alert_history.json`, rồi chạy lại bot.
 
 ## Xử lý lỗi thường gặp
 
