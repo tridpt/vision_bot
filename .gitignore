@@ -1,16 +1,34 @@
-# Bỏ qua file chứa mật khẩu
+# Secrets
 .env
+.env.*
+!.env.example
 
-# Bỏ qua các ảnh chụp được để tránh nặng kho chứa
-*.jpg
-*.png
-*.jpeg
-*.mp4
-*.avi
+# Local runtime config
 settings.json
 settings.json.tmp
-logs/
 
-# Bỏ qua các file rác của thư viện Python
+# Bot runtime logs and alert media
+logs/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+anh_telegram.*
+anh_nha_cua.*
+canh_bao.*
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Test and tooling cache
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
