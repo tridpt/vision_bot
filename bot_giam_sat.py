@@ -36,7 +36,6 @@ from dashboard_server import DashboardContext, start_dashboard_server
 from gemini_analyzer import ask_ai, configure_gemini_analyzer
 from settings_store import (
     HISTORY_LIMIT_CHOICES,
-    SETTING_EXAMPLES,
     SETTING_LABELS,
     SETTING_LIMITS,
     SETTING_UNITS,
@@ -45,6 +44,18 @@ from settings_store import (
     get_setting,
     get_settings_snapshot,
     update_setting,
+)
+from telegram_ui import (
+    build_clear_history_confirm_menu,
+    build_main_menu,
+    build_restart_confirm_menu,
+    build_setting_prompt,
+    build_settings_menu,
+    format_alert_history_message,
+    format_error_log_message,
+    format_settings_message,
+    format_settings_snapshot,
+    on_off_label,
 )
 from dotenv import load_dotenv
 
@@ -196,30 +207,10 @@ def tail_error_log(max_lines=20):
         return "Chưa có log lỗi nào."
     return "\n".join(lines)
 
-def format_error_log_message():
-    log_text = tail_error_log().replace("```", "` ` `")
-    return f"🧯 LOG LỖI GẦN NHẤT\n\n```text\n{log_text}\n```"
-
-def format_alert_history_message(entries):
-    if not entries:
-        return "🧾 LỊCH SỬ CẢNH BÁO\n\nChưa có cảnh báo nào được ghi lại."
-
-    lines = ["🧾 LỊCH SỬ CẢNH BÁO GẦN NHẤT"]
-    for index, entry in enumerate(entries, start=1):
-        timestamp = entry.get("timestamp")
-        video_status = entry.get("video_status") or "Không có video"
-        analysis = text_preview(entry.get("analysis"))
-        lines.append(
-            f"\n{index}. {format_timestamp(timestamp)}\n"
-            f"Video: {video_status}\n"
-            f"Gemini: {analysis}"
-        )
-    return "\n".join(lines)
-
 def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
     entries = get_recent_alert_history(limit)
     try:
-        bot.send_message(chat_id, format_alert_history_message(entries))
+        bot.send_message(chat_id, format_alert_history_message(entries, format_timestamp))
     except Exception as e:
         log_error("Khong gui duoc summary lich su canh bao", e)
         return
@@ -242,24 +233,6 @@ def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
                     bot.send_video(chat_id, video, caption=f"🎥 Video cảnh báo #{index}")
             except Exception as e:
                 log_error(f"Khong gui duoc video lich su #{index}", e)
-
-def on_off_label(value):
-    return "BẬT" if value else "TẮT"
-
-def format_settings_message():
-    current = get_settings_snapshot()
-    return (
-        "⚙️ CÀI ĐẶT VISION BOT\n\n"
-        f"🎯 Độ nhạy chuyển động: {current['motion_area_threshold']} "
-        "(số nhỏ nhạy hơn)\n"
-        f"⏱️ Cooldown cảnh báo: {current['alert_cooldown_seconds']} giây\n"
-        f"🎥 Độ dài video: {current['alert_video_seconds']} giây\n"
-        f"🎞️ FPS video: {current['alert_video_fps']}\n"
-        f"📹 Gửi video: {on_off_label(current['send_video'])}\n"
-        f"🧠 Phân tích Gemini: {on_off_label(current['use_gemini_analysis'])}\n\n"
-        f"🧾 Giữ lịch sử: {current['alert_history_limit']} cảnh báo\n\n"
-        "Bấm nút bên dưới để chỉnh. Với các mục số, bot sẽ hỏi và bạn chỉ cần nhập số mới vào khung chat."
-    )
 
 def parse_int_argument(message, command_name):
     parts = message.text.split(maxsplit=1)
@@ -313,20 +286,6 @@ def clear_pending_setting_input_from_call(call):
     with pending_setting_lock:
         pending_setting_inputs.pop(pending_key_from_call(call), None)
 
-def build_setting_prompt(setting_name):
-    label = SETTING_LABELS[setting_name]
-    unit = SETTING_UNITS[setting_name]
-    min_value, max_value = SETTING_LIMITS[setting_name]
-    current_value = get_setting(setting_name)
-    example = SETTING_EXAMPLES[setting_name]
-    return (
-        f"Nhập {label} mới.\n"
-        f"Hiện tại: {current_value}{unit}\n"
-        f"Khoảng hợp lệ: {min_value}-{max_value}{unit}\n"
-        f"Ví dụ: {example}\n\n"
-        "Gõ hủy để bỏ qua."
-    )
-
 def handle_pending_setting_input(message):
     setting_name = pop_pending_setting_input(message)
     if setting_name is None:
@@ -366,72 +325,6 @@ def adjust_numeric_setting(setting_name, delta):
     new_value = max(min_value, min(current + delta, max_value))
     update_setting(setting_name, new_value)
     return new_value
-
-def build_main_menu():
-    keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
-    keyboard.add(telebot.types.InlineKeyboardButton("📸 Chụp ngay", callback_data="menu:capture"))
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("🟢 Bật Radar", callback_data="menu:auto_on"),
-        telebot.types.InlineKeyboardButton("🔴 Tắt Radar", callback_data="menu:auto_off")
-    )
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("📡 Trạng thái", callback_data="menu:status"),
-        telebot.types.InlineKeyboardButton("🧾 Lịch sử", callback_data="menu:history")
-    )
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("🧯 Xem log lỗi", callback_data="menu:error_log"),
-        telebot.types.InlineKeyboardButton("⚙️ Cài đặt", callback_data="menu:settings")
-    )
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm"),
-        telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm")
-    )
-    return keyboard
-
-def build_restart_confirm_menu():
-    keyboard = telebot.types.InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("✅ Restart ngay", callback_data="menu:restart_execute"),
-        telebot.types.InlineKeyboardButton("⬅️ Không restart", callback_data="menu:main")
-    )
-    return keyboard
-
-def build_clear_history_confirm_menu():
-    keyboard = telebot.types.InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("✅ Xóa hết lịch sử", callback_data="menu:clear_history_execute"),
-        telebot.types.InlineKeyboardButton("⬅️ Không xóa", callback_data="menu:main")
-    )
-    return keyboard
-
-def build_settings_menu():
-    current = get_settings_snapshot()
-    video_label = "📹 Tắt video" if current["send_video"] else "📹 Bật video"
-    ai_label = "🧠 Tắt Gemini" if current["use_gemini_analysis"] else "🧠 Bật Gemini"
-    history_buttons = [
-        telebot.types.InlineKeyboardButton(
-            f"{'✅ ' if current['alert_history_limit'] == choice else ''}{choice} cảnh báo",
-            callback_data=f"setting:history_limit:{choice}"
-        )
-        for choice in HISTORY_LIMIT_CHOICES
-    ]
-
-    keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("🎯 Nhập độ nhạy", callback_data="setting:input:motion_area_threshold"),
-        telebot.types.InlineKeyboardButton("⏱️ Nhập cooldown", callback_data="setting:input:alert_cooldown_seconds")
-    )
-    keyboard.add(
-        telebot.types.InlineKeyboardButton("🎥 Nhập giây video", callback_data="setting:input:alert_video_seconds"),
-        telebot.types.InlineKeyboardButton("🎞️ Nhập FPS", callback_data="setting:input:alert_video_fps")
-    )
-    keyboard.add(
-        telebot.types.InlineKeyboardButton(video_label, callback_data="setting:toggle_video"),
-        telebot.types.InlineKeyboardButton(ai_label, callback_data="setting:toggle_ai")
-    )
-    keyboard.add(*history_buttons)
-    keyboard.add(telebot.types.InlineKeyboardButton("⬅️ Quay lại menu", callback_data="menu:main"))
-    return keyboard
 
 def edit_menu_message(call, text, reply_markup=None):
     try:
@@ -583,16 +476,6 @@ def format_size(num_bytes):
                 return f"{int(size)} {unit}"
             return f"{size:.1f} {unit}"
         size /= 1024
-
-def format_settings_snapshot(settings_snapshot):
-    return (
-        f"Độ nhạy {settings_snapshot['motion_area_threshold']} | "
-        f"Cooldown {settings_snapshot['alert_cooldown_seconds']}s | "
-        f"Video {settings_snapshot['alert_video_seconds']}s/{settings_snapshot['alert_video_fps']}fps | "
-        f"Gửi video {on_off_label(settings_snapshot['send_video'])} | "
-        f"Gemini {on_off_label(settings_snapshot['use_gemini_analysis'])} | "
-        f"Giữ lịch sử {settings_snapshot['alert_history_limit']}"
-    )
 
 def format_status_message():
     camera_ok, camera_status = get_camera_status_for_report()
@@ -970,7 +853,7 @@ def handle_menu_callback(call):
 
     if call.data == "menu:error_log":
         bot.answer_callback_query(call.id, "Đang đọc log lỗi")
-        bot.send_message(call.message.chat.id, format_error_log_message(), parse_mode="Markdown")
+        bot.send_message(call.message.chat.id, format_error_log_message(tail_error_log()), parse_mode="Markdown")
         return
 
     if call.data == "menu:restart_confirm":
