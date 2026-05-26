@@ -33,6 +33,7 @@ vision_bot/
 │  ├─ camera_tools.py
 │  ├─ gemini_analyzer.py
 │  ├─ status_report.py
+│  ├─ telegram_handlers.py
 │  └─ telegram_ui.py
 └─ tools/                       # Script thử nghiệm độc lập
    ├─ chup_anh.py

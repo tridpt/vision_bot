@@ -54,17 +54,10 @@ from vision_bot_core.status_report import (
     get_directory_size,
 )
 from vision_bot_core.telegram_ui import (
-    build_clear_history_confirm_menu,
-    build_main_menu,
-    build_restart_confirm_menu,
-    build_setting_prompt,
-    build_settings_menu,
     format_alert_history_message,
-    format_error_log_message,
-    format_settings_message,
     format_settings_snapshot,
-    on_off_label,
 )
+from vision_bot_core.telegram_handlers import TelegramHandlerContext, register_telegram_handlers
 from dotenv import load_dotenv
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
@@ -220,8 +213,6 @@ last_gray_frame = None
 camera_online = False
 last_camera_status = "Chưa kiểm tra camera"
 last_alert_timestamp = None
-pending_setting_inputs = {}
-pending_setting_lock = threading.Lock()
 
 def tail_error_log(max_lines=20):
     if not os.path.exists(ERROR_LOG_FILE):
@@ -270,110 +261,6 @@ def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
                     bot.send_video(chat_id, video, caption=f"🎥 Video cảnh báo #{index}")
             except Exception as e:
                 log_error(f"Khong gui duoc video lich su #{index}", e)
-
-def parse_int_argument(message, command_name):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        bot.reply_to(message, f"Thiếu giá trị. Ví dụ: {command_name} 10")
-        return None
-    try:
-        return int(parts[1].strip())
-    except ValueError:
-        bot.reply_to(message, "Giá trị phải là số nguyên.")
-        return None
-
-def set_numeric_setting(message, setting_name, command_name, label, unit=""):
-    clear_pending_setting_input(message)
-    value = parse_int_argument(message, command_name)
-    if value is None:
-        return
-
-    min_value, max_value = SETTING_LIMITS[setting_name]
-    if not min_value <= value <= max_value:
-        bot.reply_to(message, f"{label} phải nằm trong khoảng {min_value}-{max_value}{unit}.")
-        return
-
-    update_setting(setting_name, value)
-    bot.reply_to(message, f"✅ Đã cập nhật {label}: {value}{unit}")
-
-def set_boolean_setting(message, setting_name, value, label):
-    clear_pending_setting_input(message)
-    update_setting(setting_name, value)
-    bot.reply_to(message, f"✅ Đã {on_off_label(value)} {label}.")
-
-def pending_key_from_message(message):
-    return (message.chat.id, message.from_user.id)
-
-def pending_key_from_call(call):
-    return (call.message.chat.id, call.from_user.id)
-
-def set_pending_setting_input(call, setting_name):
-    with pending_setting_lock:
-        pending_setting_inputs[pending_key_from_call(call)] = setting_name
-
-def pop_pending_setting_input(message):
-    with pending_setting_lock:
-        return pending_setting_inputs.pop(pending_key_from_message(message), None)
-
-def clear_pending_setting_input(message):
-    with pending_setting_lock:
-        pending_setting_inputs.pop(pending_key_from_message(message), None)
-
-def clear_pending_setting_input_from_call(call):
-    with pending_setting_lock:
-        pending_setting_inputs.pop(pending_key_from_call(call), None)
-
-def handle_pending_setting_input(message):
-    setting_name = pop_pending_setting_input(message)
-    if setting_name is None:
-        return False
-
-    text = message.text.strip()
-    if text.lower() in ("hủy", "huy", "cancel", "/cancel"):
-        bot.reply_to(message, "Đã hủy chỉnh setting.", reply_markup=build_settings_menu())
-        return True
-
-    try:
-        value = int(text)
-    except ValueError:
-        set_pending_setting_input_from_message(message, setting_name)
-        bot.reply_to(message, "Giá trị phải là số nguyên. Nhập lại hoặc gõ hủy.")
-        return True
-
-    min_value, max_value = SETTING_LIMITS[setting_name]
-    label = SETTING_LABELS[setting_name]
-    unit = SETTING_UNITS[setting_name]
-    if not min_value <= value <= max_value:
-        set_pending_setting_input_from_message(message, setting_name)
-        bot.reply_to(message, f"{label} phải nằm trong khoảng {min_value}-{max_value}{unit}. Nhập lại hoặc gõ hủy.")
-        return True
-
-    update_setting(setting_name, value)
-    bot.reply_to(message, f"✅ Đã cập nhật {label}: {value}{unit}", reply_markup=build_settings_menu())
-    return True
-
-def set_pending_setting_input_from_message(message, setting_name):
-    with pending_setting_lock:
-        pending_setting_inputs[pending_key_from_message(message)] = setting_name
-
-def adjust_numeric_setting(setting_name, delta):
-    current = get_setting(setting_name)
-    min_value, max_value = SETTING_LIMITS[setting_name]
-    new_value = max(min_value, min(current + delta, max_value))
-    update_setting(setting_name, new_value)
-    return new_value
-
-def edit_menu_message(call, text, reply_markup=None):
-    try:
-        bot.edit_message_text(
-            text,
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        log_error("Khong edit duoc menu message, fallback sang send_message", e)
-        bot.send_message(call.message.chat.id, text, reply_markup=reply_markup)
 
 def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
     global auto_mode_active
@@ -660,306 +547,33 @@ t = threading.Thread(target=motion_detection_loop, daemon=True)
 t.start()
 
 
-# ===============================================
-# --- CÁC LỆNH GIAO TIẾP GIAO DIỆN TELEGRAM ---
-# ===============================================
-
-def is_allowed_user(user_id):
-    return CHIEC_CHIA_KHOA_ID_CUA_BAN == 0 or user_id == CHIEC_CHIA_KHOA_ID_CUA_BAN
-
-def verify_user(message):
-    """ Hàm lọc vân tay xác thực lại ID """
-    user_id = message.from_user.id
-    if not is_allowed_user(user_id):
-        bot.reply_to(message, "⛔ Tôi không nhận lệnh từ người lạ.")
-        return False
-    return True
-
-def verify_callback(call):
-    if not is_allowed_user(call.from_user.id):
-        bot.answer_callback_query(call.id, "Tôi không nhận lệnh từ người lạ.", show_alert=True)
-        return False
-    return True
-
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    if not verify_user(message): return
-    clear_pending_setting_input(message)
-    bot.reply_to(message, "👋 Chào Boss, Trung tâm Giám sát Cơ sở.\n\n"
-                          "⚙️ Dưới đây là các loại vũ khí:\n"
-                          "👉 Gõ lệnh `/menu` : Mở bảng điều khiển bằng nút bấm.\n"
-                          "👉 Gõ lệnh `/auto` : BẬT Lưới Laser Tự động báo động.\n"
-                          "👉 Gõ lệnh `/stop` : TẮT báo động, nhường đường lại cho tự nhiên.\n"
-                          "👉 Gõ lệnh `/status` : Kiểm tra bot, radar, camera và cảnh báo gần nhất.\n"
-                          "👉 Trong `/menu`, chọn Cài đặt hoặc Lịch sử để quản lý bot.\n"
-                          "👉 Hoặc просто Nhắn bất cứ gì (Tôi sẽ tự chụp 1 tấm để giải tỏa thắc mắc).")
-
-@bot.message_handler(commands=['menu'])
-def send_menu(message):
-    if not verify_user(message): return
-    clear_pending_setting_input(message)
-    bot.reply_to(message, "🧭 MENU ĐIỀU KHIỂN VISION BOT", reply_markup=build_main_menu())
-
-@bot.message_handler(commands=['auto'])
-def turn_on_auto(message):
-    if not verify_user(message): return
-    clear_pending_setting_input(message)
+def set_radar_state(active, chat_id=None):
     global auto_mode_active, monitoring_chat_id
-    auto_mode_active = True
-    monitoring_chat_id = message.chat.id
-    bot.reply_to(message, "🟢 Đã BẬT Radar Tự động!\n\nCamera hiện tại sẽ luôn mở. Bất kỳ loài vật sống nào tạt qua đều sẽ bị tôi bêu tên và gửi ảnh thẳng đến điện thoại chư vị!\n▶ Để tắt chống hao pin: Gõ lệnh /stop")
+    auto_mode_active = active
+    if chat_id is not None:
+        monitoring_chat_id = chat_id
 
-@bot.message_handler(commands=['stop'])
-def turn_off_auto(message):
-    if not verify_user(message): return
-    clear_pending_setting_input(message)
-    global auto_mode_active
-    auto_mode_active = False
-    bot.reply_to(message, "🔴 Đã TẮT Radar thụ động. Mắt camera đã tạm đóng kín.")
+def build_status_message():
+    return format_status_message(create_status_report_context())
 
-@bot.message_handler(commands=['status'])
-def send_status(message):
-    if not verify_user(message): return
-    clear_pending_setting_input(message)
-    bot.reply_to(message, format_status_message(create_status_report_context()))
-
-@bot.message_handler(commands=['history'])
-def send_history(message):
-    if not verify_user(message): return
-    clear_pending_setting_input(message)
-    send_alert_history(message.chat.id)
-
-@bot.message_handler(commands=['settings'])
-def send_settings(message):
-    if not verify_user(message): return
-    clear_pending_setting_input(message)
-    bot.reply_to(message, format_settings_message(), reply_markup=build_settings_menu())
-
-@bot.message_handler(commands=['set_sensitivity'])
-def set_sensitivity(message):
-    if not verify_user(message): return
-    set_numeric_setting(
-        message,
-        "motion_area_threshold",
-        "/set_sensitivity",
-        "độ nhạy chuyển động"
+def create_telegram_handler_context():
+    return TelegramHandlerContext(
+        bot=bot,
+        allowed_user_id=CHIEC_CHIA_KHOA_ID_CUA_BAN,
+        get_setting=get_setting,
+        update_setting=update_setting,
+        trim_alert_history=trim_alert_history,
+        clear_alert_history_files=clear_alert_history_files,
+        set_radar_state=set_radar_state,
+        build_status_message=build_status_message,
+        send_alert_history=send_alert_history,
+        capture_and_analyze_environment=capture_and_analyze_environment,
+        schedule_bot_restart=schedule_bot_restart,
+        tail_error_log=tail_error_log,
+        log_error=log_error
     )
 
-@bot.message_handler(commands=['set_cooldown'])
-def set_cooldown(message):
-    if not verify_user(message): return
-    set_numeric_setting(
-        message,
-        "alert_cooldown_seconds",
-        "/set_cooldown",
-        "cooldown cảnh báo",
-        " giây"
-    )
-
-@bot.message_handler(commands=['set_video_seconds'])
-def set_video_seconds(message):
-    if not verify_user(message): return
-    set_numeric_setting(
-        message,
-        "alert_video_seconds",
-        "/set_video_seconds",
-        "độ dài video",
-        " giây"
-    )
-
-@bot.message_handler(commands=['set_video_fps'])
-def set_video_fps(message):
-    if not verify_user(message): return
-    set_numeric_setting(
-        message,
-        "alert_video_fps",
-        "/set_video_fps",
-        "FPS video"
-    )
-
-@bot.message_handler(commands=['video_on'])
-def turn_video_on(message):
-    if not verify_user(message): return
-    set_boolean_setting(message, "send_video", True, "gửi video cảnh báo")
-
-@bot.message_handler(commands=['video_off'])
-def turn_video_off(message):
-    if not verify_user(message): return
-    set_boolean_setting(message, "send_video", False, "gửi video cảnh báo")
-
-@bot.message_handler(commands=['ai_on'])
-def turn_ai_on(message):
-    if not verify_user(message): return
-    set_boolean_setting(message, "use_gemini_analysis", True, "phân tích Gemini khi cảnh báo")
-
-@bot.message_handler(commands=['ai_off'])
-def turn_ai_off(message):
-    if not verify_user(message): return
-    set_boolean_setting(message, "use_gemini_analysis", False, "phân tích Gemini khi cảnh báo")
-
-@bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("menu:") or call.data.startswith("setting:")))
-def handle_menu_callback(call):
-    if not verify_callback(call): return
-    global auto_mode_active, monitoring_chat_id
-
-    if call.data == "menu:main":
-        bot.answer_callback_query(call.id)
-        edit_menu_message(call, "🧭 MENU ĐIỀU KHIỂN VISION BOT", build_main_menu())
-        return
-
-    if call.data == "menu:auto_on":
-        auto_mode_active = True
-        monitoring_chat_id = call.message.chat.id
-        bot.answer_callback_query(call.id, "Đã bật radar")
-        edit_menu_message(call, "🟢 Đã BẬT Radar Tự động.", build_main_menu())
-        return
-
-    if call.data == "menu:auto_off":
-        auto_mode_active = False
-        bot.answer_callback_query(call.id, "Đã tắt radar")
-        edit_menu_message(call, "🔴 Đã TẮT Radar thụ động.", build_main_menu())
-        return
-
-    if call.data == "menu:status":
-        bot.answer_callback_query(call.id)
-        edit_menu_message(call, format_status_message(create_status_report_context()), build_main_menu())
-        return
-
-    if call.data == "menu:capture":
-        clear_pending_setting_input_from_call(call)
-        bot.answer_callback_query(call.id, "Đang chụp ảnh")
-        capture_and_analyze_environment(
-            call.message.chat.id,
-            "Hãy mô tả ngắn gọn camera hiện đang thấy gì và có điều gì đáng chú ý không?"
-        )
-        return
-
-    if call.data == "menu:history":
-        bot.answer_callback_query(call.id, "Đang gửi lịch sử")
-        edit_menu_message(call, "🧾 Đang gửi lịch sử cảnh báo gần nhất...", build_main_menu())
-        send_alert_history(call.message.chat.id)
-        return
-
-    if call.data == "menu:error_log":
-        bot.answer_callback_query(call.id, "Đang đọc log lỗi")
-        bot.send_message(call.message.chat.id, format_error_log_message(tail_error_log()), parse_mode="Markdown")
-        return
-
-    if call.data == "menu:restart_confirm":
-        bot.answer_callback_query(call.id)
-        edit_menu_message(
-            call,
-            "🔄 RESTART BOT\n\nBot sẽ tự tắt process hiện tại và mở lại sau vài giây. Bạn chắc chắn muốn restart?",
-            build_restart_confirm_menu()
-        )
-        return
-
-    if call.data == "menu:restart_execute":
-        try:
-            schedule_bot_restart()
-        except Exception as e:
-            log_error("Khong len lich restart bot", e)
-            bot.answer_callback_query(call.id, "Restart thất bại", show_alert=True)
-            edit_menu_message(call, f"❌ Không thể restart bot: {e}", build_main_menu())
-            return
-
-        bot.answer_callback_query(call.id, "Đang restart bot")
-        edit_menu_message(call, "🔄 Bot đang restart. Chờ vài giây rồi gõ /menu để kiểm tra lại.")
-        time.sleep(0.5)
-        os._exit(0)
-
-    if call.data == "menu:clear_history_confirm":
-        bot.answer_callback_query(call.id)
-        edit_menu_message(
-            call,
-            "🧹 DỌN LỊCH SỬ\n\nThao tác này sẽ xóa toàn bộ ảnh, video cảnh báo và file lịch sử trong thư mục logs. Bạn chắc chắn muốn xóa?",
-            build_clear_history_confirm_menu()
-        )
-        return
-
-    if call.data == "menu:clear_history_execute":
-        try:
-            clear_alert_history_files()
-        except Exception as e:
-            log_error("Don lich su canh bao that bai", e)
-            bot.answer_callback_query(call.id, "Xóa lịch sử thất bại", show_alert=True)
-            edit_menu_message(call, f"❌ Không thể dọn lịch sử: {e}", build_main_menu())
-            return
-
-        bot.answer_callback_query(call.id, "Đã dọn lịch sử")
-        edit_menu_message(call, "✅ Đã xóa toàn bộ lịch sử cảnh báo.", build_main_menu())
-        return
-
-    if call.data == "menu:settings":
-        bot.answer_callback_query(call.id)
-        edit_menu_message(call, format_settings_message(), build_settings_menu())
-        return
-
-    if call.data.startswith("setting:input:"):
-        setting_name = call.data.split(":", 2)[2]
-        if setting_name not in SETTING_LIMITS:
-            bot.answer_callback_query(call.id, "Setting không hợp lệ", show_alert=True)
-            return
-
-        set_pending_setting_input(call, setting_name)
-        bot.answer_callback_query(call.id, "Nhập số trong khung chat")
-        bot.send_message(call.message.chat.id, build_setting_prompt(setting_name))
-        return
-
-    if call.data == "setting:toggle_video":
-        update_setting("send_video", not get_setting("send_video"))
-        bot.answer_callback_query(call.id, "Đã cập nhật gửi video")
-        edit_menu_message(call, format_settings_message(), build_settings_menu())
-        return
-
-    if call.data == "setting:toggle_ai":
-        update_setting("use_gemini_analysis", not get_setting("use_gemini_analysis"))
-        bot.answer_callback_query(call.id, "Đã cập nhật Gemini")
-        edit_menu_message(call, format_settings_message(), build_settings_menu())
-        return
-
-    if call.data.startswith("setting:history_limit:"):
-        try:
-            history_limit = int(call.data.rsplit(":", 1)[1])
-        except ValueError:
-            bot.answer_callback_query(call.id, "Giá trị lịch sử không hợp lệ", show_alert=True)
-            return
-
-        if history_limit not in HISTORY_LIMIT_CHOICES:
-            bot.answer_callback_query(call.id, "Chỉ hỗ trợ 10, 50 hoặc 100 cảnh báo", show_alert=True)
-            return
-
-        update_setting("alert_history_limit", history_limit)
-        trim_alert_history(history_limit)
-        bot.answer_callback_query(call.id, f"Giữ {history_limit} cảnh báo gần nhất")
-        edit_menu_message(call, format_settings_message(), build_settings_menu())
-        return
-
-    parts = call.data.split(":")
-    if len(parts) == 3 and parts[0] == "setting":
-        setting_name = parts[1]
-        try:
-            delta = int(parts[2])
-        except ValueError:
-            bot.answer_callback_query(call.id, "Giá trị nút không hợp lệ", show_alert=True)
-            return
-
-        if setting_name not in SETTING_LIMITS:
-            bot.answer_callback_query(call.id, "Setting không hợp lệ", show_alert=True)
-            return
-
-        new_value = adjust_numeric_setting(setting_name, delta)
-        bot.answer_callback_query(call.id, f"Đã cập nhật: {new_value}")
-        edit_menu_message(call, format_settings_message(), build_settings_menu())
-
-@bot.message_handler(func=lambda message: True)
-def handle_user_message(message):
-    if not verify_user(message): return
-
-    if handle_pending_setting_input(message):
-        return
-    
-    capture_and_analyze_environment(message.chat.id, message.text, reply_to_message=message)
+register_telegram_handlers(create_telegram_handler_context())
 
 if __name__ == "__main__":
     if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
