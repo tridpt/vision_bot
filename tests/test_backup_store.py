@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vision_bot_core.backup_store import backup_json_files, list_backups, prune_backups, safe_name_part
+from vision_bot_core.backup_store import (
+    backup_json_files,
+    get_latest_backup,
+    list_backups,
+    prune_backups,
+    safe_name_part,
+)
 
 
 class BackupStoreTests(unittest.TestCase):
@@ -62,6 +68,24 @@ class BackupStoreTests(unittest.TestCase):
             self.assertEqual(backups[0]["label"], "settings")
             self.assertEqual(backups[0]["reason"], "second")
             self.assertTrue(backups[0]["filename"].endswith(".json"))
+
+    def test_get_latest_backup_filters_by_label(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            backup_dir = root / "backups"
+            settings_file = root / "settings.json"
+            history_file = root / "alert_history.json"
+            settings_file.write_text("{}", encoding="utf-8")
+            history_file.write_text("[]", encoding="utf-8")
+
+            backup_json_files([("settings", str(settings_file))], str(backup_dir), reason="setting", max_backups=10)
+            backup_json_files([("alert_history", str(history_file))], str(backup_dir), reason="history", max_backups=10)
+
+            latest_settings = get_latest_backup(str(backup_dir), label="settings")
+
+            self.assertIsNotNone(latest_settings)
+            self.assertEqual(latest_settings["label"], "settings")
+            self.assertEqual(latest_settings["reason"], "setting")
 
 
 if __name__ == "__main__":

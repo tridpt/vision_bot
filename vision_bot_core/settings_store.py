@@ -143,3 +143,14 @@ def update_setting(name, value):
     with _settings_lock:
         _settings[name] = value
         save_settings(_settings.copy())
+
+
+def restore_settings_from_file(settings_path):
+    with open(settings_path, "r", encoding="utf-8") as file:
+        restored_settings = normalize_settings(json.load(file))
+
+    global _settings
+    with _settings_lock:
+        _settings = restored_settings
+        save_settings(_settings.copy())
+        return _settings.copy()

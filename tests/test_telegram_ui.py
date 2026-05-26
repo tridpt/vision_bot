@@ -21,10 +21,18 @@ class TelegramUiTests(unittest.TestCase):
             for button in row
             if button.callback_data == "menu:backups"
         ]
+        restore_buttons = [
+            button
+            for row in telegram_ui.build_main_menu().keyboard
+            for button in row
+            if button.callback_data == "menu:restore_settings_confirm"
+        ]
         self.assertEqual(len(backup_buttons), 1)
+        self.assertEqual(len(restore_buttons), 1)
         self.assertTrue(telegram_ui.build_settings_menu().keyboard)
         self.assertTrue(telegram_ui.build_restart_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_clear_history_confirm_menu().keyboard)
+        self.assertTrue(telegram_ui.build_restore_settings_confirm_menu().keyboard)
 
     def test_formatters_include_expected_sections(self):
         self.assertIn("VISION BOT", telegram_ui.format_settings_message())

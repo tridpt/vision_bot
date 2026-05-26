@@ -33,6 +33,7 @@ def backup_json_file(source_path, backup_dir, label, reason="", log_error=None):
         )
         backup_path = os.path.join(backup_dir, filename)
         shutil.copy2(source_path, backup_path)
+        os.utime(backup_path, None)
         return backup_path
     except OSError as e:
         if log_error is not None:
@@ -100,7 +101,14 @@ def parse_backup_filename(filename):
     }
 
 
-def list_backups(backup_dir, limit=5, log_error=None):
+def timestamp_from_backup_name(parsed_backup):
+    try:
+        return time.mktime(time.strptime(parsed_backup["timestamp"], "%Y%m%d_%H%M%S"))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def list_backups(backup_dir, limit=5, log_error=None, label=None):
     if not os.path.isdir(backup_dir):
         return []
 
@@ -112,18 +120,31 @@ def list_backups(backup_dir, limit=5, log_error=None):
                 continue
 
             parsed = parse_backup_filename(name) or {}
-            entries.append({
+            created_at = timestamp_from_backup_name(parsed) or os.path.getmtime(path)
+            entry = {
                 "filename": name,
                 "path": path,
                 "label": parsed.get("label", "unknown"),
                 "reason": parsed.get("reason", "unknown"),
-                "created_at": os.path.getmtime(path),
+                "created_at": created_at,
                 "size": os.path.getsize(path),
-            })
+            }
+            if label is not None and entry["label"] != label:
+                continue
+            entries.append(entry)
 
         entries.sort(key=lambda entry: (entry["created_at"], entry["filename"]), reverse=True)
+        if limit is None:
+            return entries
         return entries[:limit]
     except OSError as e:
         if log_error is not None:
             log_error(f"Khong doc duoc danh sach backup: {backup_dir}", e)
         return []
+
+
+def get_latest_backup(backup_dir, label=None, log_error=None):
+    backups = list_backups(backup_dir, limit=1, log_error=log_error, label=label)
+    if not backups:
+        return None
+    return backups[0]

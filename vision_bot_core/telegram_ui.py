@@ -107,9 +107,12 @@ def build_main_menu():
     )
     keyboard.add(
         telebot.types.InlineKeyboardButton("💾 Xem backup", callback_data="menu:backups"),
-        telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm")
+        telebot.types.InlineKeyboardButton("↩️ Khôi phục setting", callback_data="menu:restore_settings_confirm")
     )
-    keyboard.add(telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm"))
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm"),
+        telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm")
+    )
     return keyboard
 
 
@@ -127,6 +130,15 @@ def build_clear_history_confirm_menu():
     keyboard.add(
         telebot.types.InlineKeyboardButton("✅ Xóa hết lịch sử", callback_data="menu:clear_history_execute"),
         telebot.types.InlineKeyboardButton("⬅️ Không xóa", callback_data="menu:main")
+    )
+    return keyboard
+
+
+def build_restore_settings_confirm_menu():
+    keyboard = telebot.types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("✅ Khôi phục setting", callback_data="menu:restore_settings_execute"),
+        telebot.types.InlineKeyboardButton("⬅️ Không khôi phục", callback_data="menu:main")
     )
     return keyboard
 

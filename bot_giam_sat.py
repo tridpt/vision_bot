@@ -21,7 +21,7 @@ from vision_bot_core.alert_history_store import (
     text_preview,
     trim_alert_history as trim_alert_history_unprotected,
 )
-from vision_bot_core.backup_store import backup_json_files, list_backups
+from vision_bot_core.backup_store import backup_json_files, get_latest_backup, list_backups
 from vision_bot_core.camera_tools import (
     read_camera_frame,
     save_frame,
@@ -38,6 +38,7 @@ from vision_bot_core.settings_store import (
     configure_settings_store,
     get_setting,
     get_settings_snapshot,
+    restore_settings_from_file,
     update_setting as save_setting,
 )
 from vision_bot_core.status_report import (
@@ -163,6 +164,18 @@ def trim_alert_history(limit):
 def clear_alert_history_files():
     backup_runtime_state("before_clear_history", include_settings=False, include_history=True)
     clear_alert_history_files_unprotected()
+
+def restore_latest_settings_backup():
+    latest_backup = get_latest_backup(BACKUP_DIR, label="settings", log_error=log_error)
+    if latest_backup is None:
+        return None
+
+    backup_runtime_state("before_restore_settings", include_settings=True, include_history=False)
+    restored_settings = restore_settings_from_file(latest_backup["path"])
+    return {
+        "backup": latest_backup,
+        "settings": restored_settings,
+    }
 
 configure_alert_history_store(
     base_dir=BASE_DIR,
@@ -392,6 +405,7 @@ def create_telegram_handler_context():
         set_radar_state=motion_monitor.set_radar_state,
         build_status_message=build_status_message,
         list_backups=get_recent_backups,
+        restore_latest_settings_backup=restore_latest_settings_backup,
         format_timestamp=format_timestamp,
         format_size=format_size,
         send_alert_history=send_alert_history,

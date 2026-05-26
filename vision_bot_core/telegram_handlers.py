@@ -13,6 +13,7 @@ from .telegram_ui import (
     build_clear_history_confirm_menu,
     build_main_menu,
     build_restart_confirm_menu,
+    build_restore_settings_confirm_menu,
     build_setting_prompt,
     build_settings_menu,
     format_backup_list_message,
@@ -33,6 +34,7 @@ class TelegramHandlerContext:
     set_radar_state: object
     build_status_message: object
     list_backups: object
+    restore_latest_settings_backup: object
     format_timestamp: object
     format_size: object
     send_alert_history: object
@@ -332,6 +334,43 @@ def register_telegram_handlers(ctx):
             bot.send_message(
                 call.message.chat.id,
                 format_backup_list_message(backups, ctx.format_timestamp, ctx.format_size)
+            )
+            return
+
+        if call.data == "menu:restore_settings_confirm":
+            clear_pending_setting_input_from_call(call)
+            bot.answer_callback_query(call.id)
+            edit_menu_message(
+                call,
+                "↩️ KHÔI PHỤC SETTING\n\nBot sẽ lấy file backup setting gần nhất trong logs/backups và ghi lại vào settings.json. Setting hiện tại sẽ được backup trước khi khôi phục. Bạn chắc chắn muốn làm?",
+                build_restore_settings_confirm_menu()
+            )
+            return
+
+        if call.data == "menu:restore_settings_execute":
+            clear_pending_setting_input_from_call(call)
+            try:
+                restore_result = ctx.restore_latest_settings_backup()
+            except Exception as e:
+                ctx.log_error("Khoi phuc setting that bai", e)
+                bot.answer_callback_query(call.id, "Khôi phục setting thất bại", show_alert=True)
+                edit_menu_message(call, f"❌ Không thể khôi phục setting: {e}", build_main_menu())
+                return
+
+            if restore_result is None:
+                bot.answer_callback_query(call.id, "Chưa có backup setting", show_alert=True)
+                edit_menu_message(call, "💾 Chưa có backup setting nào để khôi phục.", build_main_menu())
+                return
+
+            backup = restore_result["backup"]
+            bot.answer_callback_query(call.id, "Đã khôi phục setting")
+            edit_menu_message(
+                call,
+                "✅ Đã khôi phục setting gần nhất.\n\n"
+                f"File: {backup['filename']}\n"
+                f"Thời gian backup: {ctx.format_timestamp(backup.get('created_at'))}\n\n"
+                f"{format_settings_message()}",
+                build_settings_menu()
             )
             return
 

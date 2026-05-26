@@ -34,6 +34,7 @@ class TelegramHandlersTests(unittest.TestCase):
             set_radar_state=lambda active, chat_id=None: None,
             build_status_message=lambda: "status",
             list_backups=lambda: [],
+            restore_latest_settings_backup=lambda: None,
             format_timestamp=lambda timestamp: str(timestamp),
             format_size=lambda size: str(size),
             send_alert_history=lambda chat_id: None,
