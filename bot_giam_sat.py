@@ -1,5 +1,4 @@
 import telebot
-import cv2
 import sys
 import os
 import logging
@@ -23,6 +22,16 @@ from alert_history_store import (
     relative_to_base,
     text_preview,
     trim_alert_history,
+)
+from camera_tools import (
+    build_motion_gray,
+    check_camera_once,
+    has_large_motion,
+    open_camera,
+    read_camera_frame,
+    record_alert_video,
+    save_frame,
+    warm_up_camera,
 )
 from dashboard_server import DashboardContext, start_dashboard_server
 from settings_store import (
@@ -459,15 +468,10 @@ def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
         auto_mode_active = False
         time.sleep(1.5)
 
-    camera = None
     success = False
     try:
-        camera = cv2.VideoCapture(0)
-        time.sleep(1)
-        success, img = camera.read()
+        success, img = read_camera_frame(warmup_seconds=1)
     finally:
-        if camera is not None:
-            camera.release()
         if was_auto:
             auto_mode_active = True
 
@@ -481,7 +485,7 @@ def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
         return
 
     image_path = os.path.join(BASE_DIR, "anh_telegram.jpg")
-    cv2.imwrite(image_path, img)
+    save_frame(image_path, img)
 
     try:
         answer = ask_ai(image_path, question)
@@ -500,19 +504,6 @@ def format_timestamp(timestamp):
     if timestamp is None:
         return "Chưa có cảnh báo nào"
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
-
-def check_camera_once():
-    camera = cv2.VideoCapture(0)
-    try:
-        time.sleep(0.5)
-        if not camera.isOpened():
-            return False, "Không mở được camera"
-        success, _ = camera.read()
-        if success:
-            return True, "Mở và đọc được ảnh thử"
-        return False, "Mở được camera nhưng không đọc được ảnh"
-    finally:
-        camera.release()
 
 def get_camera_status_for_report():
     if auto_mode_active:
@@ -653,62 +644,6 @@ def send_startup_notification():
     except Exception as e:
         log_error("Khong gui duoc startup notification", e)
 
-def create_alert_video_writer(video_path, fps, frame_size):
-    codec_options = (
-        ("avc1", "H.264"),
-        ("H264", "H.264"),
-        ("mp4v", "MP4V")
-    )
-    for fourcc_name, codec_label in codec_options:
-        writer = cv2.VideoWriter(
-            video_path,
-            cv2.VideoWriter_fourcc(*fourcc_name),
-            fps,
-            frame_size
-        )
-        if writer.isOpened():
-            return writer, codec_label
-        writer.release()
-    return None, ""
-
-def record_alert_video(camera_stream, first_frame, video_path, duration_seconds, fps):
-    height, width = first_frame.shape[:2]
-    width -= width % 2
-    height -= height % 2
-    frame_size = (width, height)
-    writer, codec_label = create_alert_video_writer(video_path, fps, frame_size)
-    if writer is None:
-        return False, "Không tạo được file video"
-
-    frames_written = 0
-    read_failed = False
-    next_frame_time = time.time()
-    end_time = time.time() + duration_seconds
-    frame = first_frame
-
-    try:
-        while time.time() < end_time:
-            writer.write(frame[:height, :width])
-            frames_written += 1
-
-            success, frame = camera_stream.read()
-            if not success:
-                read_failed = True
-                break
-
-            next_frame_time += 1 / fps
-            delay = next_frame_time - time.time()
-            if delay > 0:
-                time.sleep(delay)
-    finally:
-        writer.release()
-
-    if frames_written == 0 or not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
-        return False, "Video rỗng hoặc không ghi được frame nào"
-    if read_failed:
-        return True, f"Camera dừng sớm, đã gửi phần video ghi được ({codec_label})"
-    return True, f"Đã ghi clip {duration_seconds} giây ({codec_label})"
-
 # --- TÍNH NĂNG ĐẶC BIỆT: LUỒNG CHẠY NGẦM BẮT CHUYỂN ĐỘNG THEO THỜI GIAN THỰC ---
 def motion_detection_loop():
     global auto_mode_active, monitoring_chat_id, last_gray_frame
@@ -732,7 +667,7 @@ def motion_detection_loop():
                 
             # Trạng thái BẬT - Ép camera chạy liên tục không nghỉ
             if camera_stream is None:
-                camera_stream = cv2.VideoCapture(0)
+                camera_stream = open_camera()
                 time.sleep(1.5) # Để camera hấp thụ ánh sáng
                 if not camera_stream.isOpened():
                     camera_online = False
@@ -745,8 +680,7 @@ def motion_detection_loop():
                     time.sleep(2)
                     continue
                 # Xả bộ nhớ đệm (buffer) bị kẹt của các giây trước đó
-                for _ in range(5):
-                    camera_stream.read()
+                warm_up_camera(camera_stream, delay_seconds=0, buffer_reads=5)
                 
             success, img = camera_stream.read()
             if not success:
@@ -763,31 +697,19 @@ def motion_detection_loop():
             # NẾU SAU KHI VỪA CẢNH BÁO XONG: Chờ 10 giây (theo thiết lập của Boss) để không bị spam tin 
             # Nhưng KHÔNG ĐƯỢC dùng time.sleep làm kẹt luồng ở đây
             if time.time() - last_alert_time < get_setting("alert_cooldown_seconds"):
-                last_gray_frame = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), (21, 21), 0)
+                last_gray_frame = build_motion_gray(img)
                 time.sleep(0.1)
                 continue
                 
             # Thuật toán Dò sự xê dịch: Chuyển ảnh màu về khung xám
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (21, 21), 0)
+            gray = build_motion_gray(img)
             
             if last_gray_frame is None:
                 last_gray_frame = gray
                 continue
                 
-            # Đem "trừ" hai khoảng khắc liên tiếp cho nhau 
-            diff = cv2.absdiff(last_gray_frame, gray)
-            thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)[1]
-            thresh = cv2.dilate(thresh, None, iterations=2)
-            
-            contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            co_chuyen_dong = False
             motion_area_threshold = get_setting("motion_area_threshold")
-            for contour in contours:
-                if cv2.contourArea(contour) > motion_area_threshold:
-                    co_chuyen_dong = True
-                    break
+            co_chuyen_dong = has_large_motion(last_gray_frame, gray, motion_area_threshold)
                     
             # NẾU PHÁT HIỆN SỰ XÊ DỊCH LỚN TRONG PHÒNG
             if co_chuyen_dong:
@@ -799,7 +721,7 @@ def motion_detection_loop():
                 video_path = None
                 video_status = "Không ghi video"
                 analysis = "Gemini đang tắt"
-                cv2.imwrite(image_path, img)
+                save_frame(image_path, img)
                 bot.send_message(monitoring_chat_id, "🚨 BÁO ĐỘNG KÍCH HOẠT: Phát hiện có sự dịch chuyển lớn trong phòng!")
 
                 if get_setting("send_video"):
