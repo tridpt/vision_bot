@@ -3,7 +3,6 @@ import sys
 import os
 import logging
 import subprocess
-import threading
 import time
 from logging.handlers import RotatingFileHandler
 from vision_bot_core.alert_history_store import (
@@ -24,17 +23,12 @@ from vision_bot_core.alert_history_store import (
 )
 from vision_bot_core.backup_store import backup_json_files
 from vision_bot_core.camera_tools import (
-    build_motion_gray,
-    check_camera_once,
-    has_large_motion,
-    open_camera,
     read_camera_frame,
-    record_alert_video,
     save_frame,
-    warm_up_camera,
 )
 from vision_bot_core.dashboard_server import DashboardContext, start_dashboard_server
 from vision_bot_core.gemini_analyzer import ask_ai, configure_gemini_analyzer
+from vision_bot_core.motion_monitor import MotionMonitor, MotionMonitorContext
 from vision_bot_core.settings_store import (
     HISTORY_LIMIT_CHOICES,
     SETTING_LABELS,
@@ -206,14 +200,6 @@ bot.set_my_commands([
     telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất")
 ])
 
-# Cơ chế Threading
-auto_mode_active = False
-monitoring_chat_id = None
-last_gray_frame = None
-camera_online = False
-last_camera_status = "Chưa kiểm tra camera"
-last_alert_timestamp = None
-
 def tail_error_log(max_lines=20):
     if not os.path.exists(ERROR_LOG_FILE):
         return "Chưa có log lỗi nào."
@@ -263,16 +249,14 @@ def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
                 log_error(f"Khong gui duoc video lich su #{index}", e)
 
 def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
-    global auto_mode_active
-
     if reply_to_message is None:
         bot.send_message(chat_id, "👁️ Đang chụp ảnh phân tích theo lệnh...")
     else:
         bot.reply_to(reply_to_message, "👁️ Đang chụp ảnh phân tích theo lệnh...")
 
-    was_auto = auto_mode_active
+    was_auto = motion_monitor.is_radar_active()
     if was_auto:
-        auto_mode_active = False
+        motion_monitor.set_radar_state(False)
         time.sleep(1.5)
 
     success = False
@@ -280,7 +264,7 @@ def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
         success, img = read_camera_frame(warmup_seconds=1)
     finally:
         if was_auto:
-            auto_mode_active = True
+            motion_monitor.set_radar_state(True)
 
     if not success:
         error_message = "❌ Lỗi: Không thể khởi động Camera. Có rào cản từ hệ thống."
@@ -312,32 +296,30 @@ def format_timestamp(timestamp):
         return "Chưa có cảnh báo nào"
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
 
-def get_camera_status_for_report():
-    if auto_mode_active:
-        return camera_online, last_camera_status
-    return check_camera_once()
+def create_motion_monitor_context():
+    return MotionMonitorContext(
+        bot=bot,
+        log_dir=LOG_DIR,
+        get_setting=get_setting,
+        get_settings_snapshot=get_settings_snapshot,
+        add_alert_history=add_alert_history,
+        make_alert_id=make_alert_id,
+        ensure_log_dir=ensure_log_dir,
+        relative_to_base=relative_to_base,
+        ask_ai=ask_ai,
+        log_error=log_error
+    )
 
-def get_camera_status_for_dashboard():
-    if auto_mode_active:
-        return camera_online, last_camera_status
-    if last_camera_status and last_camera_status != "Chưa kiểm tra camera":
-        return camera_online, last_camera_status
-    return False, "Camera chưa kiểm tra trên dashboard"
-
-def is_radar_active():
-    return auto_mode_active
-
-def get_last_alert_timestamp():
-    return last_alert_timestamp
+motion_monitor = MotionMonitor(create_motion_monitor_context())
 
 def create_status_report_context():
     return StatusReportContext(
         bot_start_time=BOT_START_TIME,
         dashboard_url=DASHBOARD_URL,
         log_dir=LOG_DIR,
-        get_camera_status=get_camera_status_for_report,
-        is_radar_active=is_radar_active,
-        get_last_alert_timestamp=get_last_alert_timestamp,
+        get_camera_status=motion_monitor.get_camera_status_for_report,
+        is_radar_active=motion_monitor.is_radar_active,
+        get_last_alert_timestamp=motion_monitor.get_last_alert_timestamp,
         get_alert_history_count=get_alert_history_count,
         get_settings_snapshot=get_settings_snapshot,
         format_timestamp=format_timestamp,
@@ -358,14 +340,14 @@ def create_dashboard_context():
         bot_start_time=BOT_START_TIME,
         get_settings_snapshot=get_settings_snapshot,
         get_alert_history_snapshot=get_alert_history_snapshot,
-        get_camera_status=get_camera_status_for_dashboard,
-        is_radar_active=is_radar_active,
+        get_camera_status=motion_monitor.get_camera_status_for_dashboard,
+        is_radar_active=motion_monitor.is_radar_active,
         format_size=format_size,
         get_directory_size=lambda path: get_directory_size(path, log_error=log_error),
         format_duration=format_duration,
         tail_error_log=tail_error_log,
         format_timestamp=format_timestamp,
-        last_alert_timestamp=get_last_alert_timestamp,
+        last_alert_timestamp=motion_monitor.get_last_alert_timestamp,
         text_preview=text_preview,
         is_safe_alert_media_path=is_safe_alert_media_path,
         absolute_from_base=absolute_from_base,
@@ -393,166 +375,6 @@ def send_startup_notification():
     except Exception as e:
         log_error("Khong gui duoc startup notification", e)
 
-# --- TÍNH NĂNG ĐẶC BIỆT: LUỒNG CHẠY NGẦM BẮT CHUYỂN ĐỘNG THEO THỜI GIAN THỰC ---
-def motion_detection_loop():
-    global auto_mode_active, monitoring_chat_id, last_gray_frame
-    global camera_online, last_camera_status, last_alert_timestamp
-    camera_stream = None
-    last_alert_time = 0 # Lưu thời điểm cảnh báo cuối cùng
-    last_camera_error_log_time = 0
-    
-    while True:
-        try:
-            # Nếu đang ở Trạng thái TẮT, giải phóng camera ngay lập tức
-            if not auto_mode_active or monitoring_chat_id is None:
-                if camera_stream is not None:
-                    camera_stream.release()
-                    camera_stream = None
-                    last_gray_frame = None
-                    camera_online = False
-                    last_camera_status = "Camera đang nghỉ vì radar tắt"
-                time.sleep(1)
-                continue
-                
-            # Trạng thái BẬT - Ép camera chạy liên tục không nghỉ
-            if camera_stream is None:
-                camera_stream = open_camera()
-                time.sleep(1.5) # Để camera hấp thụ ánh sáng
-                if not camera_stream.isOpened():
-                    camera_online = False
-                    last_camera_status = "Radar bật nhưng không mở được camera"
-                    if time.time() - last_camera_error_log_time > 60:
-                        log_error(last_camera_status)
-                        last_camera_error_log_time = time.time()
-                    camera_stream.release()
-                    camera_stream = None
-                    time.sleep(2)
-                    continue
-                # Xả bộ nhớ đệm (buffer) bị kẹt của các giây trước đó
-                warm_up_camera(camera_stream, delay_seconds=0, buffer_reads=5)
-                
-            success, img = camera_stream.read()
-            if not success:
-                camera_online = False
-                last_camera_status = "Radar bật nhưng không đọc được ảnh từ camera"
-                if time.time() - last_camera_error_log_time > 60:
-                    log_error(last_camera_status)
-                    last_camera_error_log_time = time.time()
-                time.sleep(0.5)
-                continue
-            camera_online = True
-            last_camera_status = "Camera đang mở bởi radar"
-                
-            # NẾU SAU KHI VỪA CẢNH BÁO XONG: Chờ 10 giây (theo thiết lập của Boss) để không bị spam tin 
-            # Nhưng KHÔNG ĐƯỢC dùng time.sleep làm kẹt luồng ở đây
-            if time.time() - last_alert_time < get_setting("alert_cooldown_seconds"):
-                last_gray_frame = build_motion_gray(img)
-                time.sleep(0.1)
-                continue
-                
-            # Thuật toán Dò sự xê dịch: Chuyển ảnh màu về khung xám
-            gray = build_motion_gray(img)
-            
-            if last_gray_frame is None:
-                last_gray_frame = gray
-                continue
-                
-            motion_area_threshold = get_setting("motion_area_threshold")
-            co_chuyen_dong = has_large_motion(last_gray_frame, gray, motion_area_threshold)
-                    
-            # NẾU PHÁT HIỆN SỰ XÊ DỊCH LỚN TRONG PHÒNG
-            if co_chuyen_dong:
-                last_alert_time = time.time() # Cập nhật lại mốc thời gian vừa báo động
-                last_alert_timestamp = last_alert_time
-                alert_id = make_alert_id(last_alert_time)
-                ensure_log_dir()
-                image_path = os.path.join(LOG_DIR, f"alert_{alert_id}.jpg")
-                video_path = None
-                video_status = "Không ghi video"
-                analysis = "Gemini đang tắt"
-                save_frame(image_path, img)
-                bot.send_message(monitoring_chat_id, "🚨 BÁO ĐỘNG KÍCH HOẠT: Phát hiện có sự dịch chuyển lớn trong phòng!")
-
-                if get_setting("send_video"):
-                    video_path = os.path.join(LOG_DIR, f"alert_{alert_id}.mp4")
-                    video_seconds = get_setting("alert_video_seconds")
-                    video_fps = get_setting("alert_video_fps")
-                    video_ready, video_status = record_alert_video(
-                        camera_stream,
-                        img,
-                        video_path,
-                        video_seconds,
-                        video_fps
-                    )
-                    if video_ready:
-                        try:
-                            with open(video_path, 'rb') as video:
-                                bot.send_video(
-                                    monitoring_chat_id,
-                                    video,
-                                    caption=f"🎥 Clip cảnh báo {video_seconds} giây\n{video_status}"
-                                )
-                        except Exception as e:
-                            log_error("Da ghi video canh bao nhung gui Telegram that bai", e)
-                            bot.send_message(monitoring_chat_id, f"⚠️ Đã ghi video nhưng gửi Telegram thất bại: {e}")
-                    else:
-                        bot.send_message(monitoring_chat_id, f"⚠️ Không ghi được video cảnh báo: {video_status}")
-                        video_path = None
-                else:
-                    video_status = "Đã tắt gửi video trong setting"
-
-                if get_setting("use_gemini_analysis"):
-                    try:
-                        # Chuyển ngay lệnh Tự suy luận cho Gemini phân tích
-                        analysis = ask_ai(image_path, "Báo động có sự chuyển động. Đó là con người hay một con vật? Bọn họ đang định làm gì?")
-                        with open(image_path, 'rb') as photo:
-                            bot.send_photo(monitoring_chat_id, photo, caption=f"🧠 Phân tích hiện trường:\n\n{analysis}")
-                    except Exception as e:
-                        log_error("Gemini loi khi phan tich canh bao", e)
-                        analysis = f"Gemini lỗi: {e}"
-                        try:
-                            with open(image_path, 'rb') as photo:
-                                bot.send_photo(monitoring_chat_id, photo, caption=f"📸 Ảnh cảnh báo\n⚠️ Gemini lỗi: {e}")
-                        except Exception as send_error:
-                            log_error("Khong gui duoc anh canh bao sau khi Gemini loi", send_error)
-                else:
-                    try:
-                        with open(image_path, 'rb') as photo:
-                            bot.send_photo(monitoring_chat_id, photo, caption="📸 Ảnh cảnh báo")
-                    except Exception as e:
-                        log_error("Khong gui duoc anh canh bao khi tat Gemini", e)
-
-                add_alert_history({
-                    "id": alert_id,
-                    "timestamp": last_alert_time,
-                    "image_path": relative_to_base(image_path),
-                    "video_path": relative_to_base(video_path) if video_path else None,
-                    "video_status": video_status,
-                    "analysis": analysis,
-                    "settings": get_settings_snapshot()
-                })
-                
-                last_gray_frame = gray
-                continue
-                
-            last_gray_frame = gray
-            # Quét siêu nhanh để camera cập nhật đúng thời gian thực
-            time.sleep(0.1)
-        except Exception as e:
-            log_error("Loi trong vong lap motion_detection_loop", e)
-            time.sleep(5)
-
-# Bật luồng chạy ngầm đa nhiệm (Luôn song hành với Telegram)
-t = threading.Thread(target=motion_detection_loop, daemon=True)
-t.start()
-
-
-def set_radar_state(active, chat_id=None):
-    global auto_mode_active, monitoring_chat_id
-    auto_mode_active = active
-    if chat_id is not None:
-        monitoring_chat_id = chat_id
-
 def build_status_message():
     return format_status_message(create_status_report_context())
 
@@ -564,7 +386,7 @@ def create_telegram_handler_context():
         update_setting=update_setting,
         trim_alert_history=trim_alert_history,
         clear_alert_history_files=clear_alert_history_files,
-        set_radar_state=set_radar_state,
+        set_radar_state=motion_monitor.set_radar_state,
         build_status_message=build_status_message,
         send_alert_history=send_alert_history,
         capture_and_analyze_environment=capture_and_analyze_environment,
@@ -573,6 +395,7 @@ def create_telegram_handler_context():
         log_error=log_error
     )
 
+motion_monitor.start()
 register_telegram_handlers(create_telegram_handler_context())
 
 if __name__ == "__main__":

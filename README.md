@@ -32,6 +32,7 @@ vision_bot/
 │  ├─ backup_store.py
 │  ├─ camera_tools.py
 │  ├─ gemini_analyzer.py
+│  ├─ motion_monitor.py
 │  ├─ status_report.py
 │  ├─ telegram_handlers.py
 │  └─ telegram_ui.py
