@@ -200,4 +200,6 @@ $files = rg --files -g "*.py"
 python -m py_compile @files
 ```
 
+GitHub Actions cũng tự chạy unit test và compile sau mỗi lần push. Xem kết quả ở tab `Actions` của repo trên GitHub hoặc dấu trạng thái cạnh commit.
+
 Các module chính nên đặt trong `vision_bot_core/`. Giữ `bot_giam_sat.py` ở root để script chạy nền Windows vẫn hoạt động ổn định.
