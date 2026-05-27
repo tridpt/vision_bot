@@ -48,13 +48,17 @@ class StatusReportTests(unittest.TestCase):
                 get_settings_snapshot=lambda: {"alert_history_limit": 50},
                 format_timestamp=lambda timestamp: f"time-{timestamp}",
                 format_settings_snapshot=lambda settings: "settings-summary",
+                is_bot_running=lambda: True,
             )
 
             message = format_status_message(ctx)
 
+            self.assertIn("Bot: ĐANG CHẠY", message)
             self.assertIn("Radar: BẬT", message)
+            self.assertIn("Camera: SỐNG", message)
             self.assertIn("Camera OK", message)
             self.assertIn("time-123", message)
+            self.assertIn("Lần cảnh báo gần nhất", message)
             self.assertIn("2/50", message)
             self.assertIn("1.0 KB", message)
             self.assertIn("http://127.0.0.1:8765", message)

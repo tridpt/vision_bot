@@ -16,6 +16,18 @@ class StatusReportContext:
     format_timestamp: object
     format_settings_snapshot: object
     log_error: object = None
+    is_bot_running: object = None
+
+
+def resolve_status_flag(flag, default=True):
+    if flag is None:
+        return default
+    try:
+        if callable(flag):
+            return bool(flag())
+        return bool(flag)
+    except Exception:
+        return default
 
 
 def format_duration(seconds):
@@ -64,8 +76,10 @@ def format_size(num_bytes):
 
 def format_status_message(ctx):
     camera_ok, camera_status = ctx.get_camera_status()
+    bot_ok = resolve_status_flag(getattr(ctx, "is_bot_running", None), default=True)
+    bot_status = "ĐANG CHẠY" if bot_ok else "ĐANG DỪNG"
     radar_status = "BẬT" if ctx.is_radar_active() else "TẮT"
-    camera_icon = "✅" if camera_ok else "❌"
+    camera_health = "SỐNG" if camera_ok else "CHẾT"
     alert_time = ctx.format_timestamp(ctx.get_last_alert_timestamp())
     uptime = format_duration(time.time() - ctx.bot_start_time)
     alert_count = ctx.get_alert_history_count()
@@ -73,11 +87,13 @@ def format_status_message(ctx):
     settings_snapshot = ctx.get_settings_snapshot()
 
     return (
-        "📡 TRẠNG THÁI VISION BOT\n\n"
-        "✅ Bot: Đang chạy và nhận lệnh Telegram\n"
+        "🩺 TRẠNG THÁI SỨC KHỎE VISION BOT\n\n"
+        f"🤖 Bot: {bot_status}\n"
         f"📍 Radar: {radar_status}\n"
-        f"{camera_icon} Camera: {camera_status}\n"
-        f"🚨 Lần cảnh báo gần nhất: {alert_time}\n"
+        f"📷 Camera: {camera_health}\n"
+        f"🕒 Lần cảnh báo gần nhất: {alert_time}\n"
+        f"ℹ️ Camera chi tiết: {camera_status}\n\n"
+        "📊 THỐNG KÊ\n"
         f"🧾 Cảnh báo trong lịch sử: {alert_count}/{settings_snapshot['alert_history_limit']}\n"
         f"💾 Dung lượng logs: {logs_size}\n"
         f"⏳ Uptime: {uptime}\n"

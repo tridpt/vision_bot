@@ -247,6 +247,16 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("/scan-cameras", html)
         self.assertIn("/test-camera", html)
 
+    def test_render_status_tab_includes_health_cards(self):
+        html = render_dashboard_html(make_dashboard_context(), active_tab="status")
+
+        self.assertIn("Sức khỏe hệ thống", html)
+        self.assertIn("Bot", html)
+        self.assertIn("ĐANG CHẠY", html)
+        self.assertIn("Camera", html)
+        self.assertIn("CHẾT", html)
+        self.assertIn("Lần cảnh báo gần nhất", html)
+
     def test_render_history_tab_paginates_alerts(self):
         entries = [
             {"id": f"alert-{index}", "timestamp": index, "analysis": f"record {index:03d}"}

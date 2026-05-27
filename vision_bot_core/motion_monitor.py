@@ -115,6 +115,15 @@ class MotionMonitor:
         with self._lock:
             self._last_alert_timestamp = timestamp
 
+    def _reset_camera_connection(self, camera_stream, status):
+        if camera_stream is not None:
+            try:
+                camera_stream.release()
+            except Exception as e:
+                self.ctx.log_error("Khong giai phong duoc camera", e)
+        self._set_camera_status(False, status)
+        return None, None, None
+
     def _motion_detection_loop(self):
         camera_stream = None
         active_camera_config = None
@@ -126,22 +135,19 @@ class MotionMonitor:
             try:
                 auto_mode_active, monitoring_chat_id = self._get_monitoring_state()
                 if not auto_mode_active or monitoring_chat_id is None:
-                    if camera_stream is not None:
-                        camera_stream.release()
-                        camera_stream = None
-                        active_camera_config = None
-                        last_gray_frame = None
-                        self._set_camera_status(False, "Camera đang nghỉ vì radar tắt")
+                    camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
+                        camera_stream,
+                        "Camera đang nghỉ vì radar tắt"
+                    )
                     time.sleep(1)
                     continue
 
                 camera_config = normalize_camera_config(self.ctx.get_settings_snapshot())
                 if camera_stream is not None and camera_config != active_camera_config:
-                    camera_stream.release()
-                    camera_stream = None
-                    active_camera_config = None
-                    last_gray_frame = None
-                    self._set_camera_status(False, "Đang áp dụng cấu hình camera mới")
+                    camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
+                        camera_stream,
+                        "Đang áp dụng cấu hình camera mới"
+                    )
 
                 if camera_stream is None:
                     camera_stream = open_camera(camera_config=camera_config)
@@ -149,13 +155,13 @@ class MotionMonitor:
                     time.sleep(1.5)
                     if not camera_stream.isOpened():
                         status = f"Radar bật nhưng không mở được {format_camera_config(camera_config)}"
-                        self._set_camera_status(False, status)
+                        camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
+                            camera_stream,
+                            status
+                        )
                         if time.time() - last_camera_error_log_time > 60:
                             self.ctx.log_error(status)
                             last_camera_error_log_time = time.time()
-                        camera_stream.release()
-                        camera_stream = None
-                        active_camera_config = None
                         time.sleep(2)
                         continue
                     warm_up_camera(camera_stream, delay_seconds=0, buffer_reads=5)
@@ -163,11 +169,14 @@ class MotionMonitor:
                 success, img = camera_stream.read()
                 if not success:
                     status = f"Radar bật nhưng không đọc được ảnh từ {format_camera_config(active_camera_config)}"
-                    self._set_camera_status(False, status)
+                    camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
+                        camera_stream,
+                        status
+                    )
                     if time.time() - last_camera_error_log_time > 60:
                         self.ctx.log_error(status)
                         last_camera_error_log_time = time.time()
-                    time.sleep(0.5)
+                    time.sleep(1)
                     continue
                 img = transform_camera_frame(img, active_camera_config)
                 self._set_camera_status(True, f"Camera đang mở bởi radar ({format_camera_config(active_camera_config)})")

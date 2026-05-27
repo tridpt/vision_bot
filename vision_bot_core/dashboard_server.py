@@ -49,6 +49,7 @@ class DashboardContext:
     delete_backup: object
     clamp_int: object
     log_error: object
+    is_bot_running: object = None
 
 
 DASHBOARD_TABS = (
@@ -805,6 +806,17 @@ def bool_from_dashboard(value, default):
     return str(value).strip().lower() in ("true", "1", "yes", "on", "bat", "bật")
 
 
+def resolve_dashboard_flag(flag, default=True):
+    if flag is None:
+        return default
+    try:
+        if callable(flag):
+            return bool(flag())
+        return bool(flag)
+    except Exception:
+        return default
+
+
 def update_dashboard_settings(ctx, form):
     updates = {}
     current = ctx.get_settings_snapshot()
@@ -867,9 +879,14 @@ def render_dashboard_html(
     )
     pagination_controls = render_dashboard_history_pagination(history_filter, history_page, total_history_pages)
     camera_ok, camera_status = ctx.get_camera_status()
+    bot_ok = resolve_dashboard_flag(getattr(ctx, "is_bot_running", None), default=True)
+    bot_status = "ĐANG CHẠY" if bot_ok else "ĐANG DỪNG"
+    bot_class = "ok" if bot_ok else "bad"
     radar_status = "BẬT" if ctx.is_radar_active() else "TẮT"
+    camera_health = "SỐNG" if camera_ok else "CHẾT"
     logs_size = ctx.format_size(ctx.get_directory_size(ctx.log_dir))
     uptime = ctx.format_duration(time.time() - ctx.bot_start_time)
+    last_alert_text = ctx.format_timestamp(ctx.last_alert_timestamp())
     error_log = escape_html(ctx.tail_error_log())
     settings_form = render_dashboard_settings_form(ctx, settings_snapshot)
     backups = ctx.list_backups(limit=20)
@@ -883,17 +900,21 @@ def render_dashboard_html(
     tabs_html = render_dashboard_tabs(active_tab, history_filter, backup_filter)
     status_content = f"""
     <section class="grid">
+      <div class="card"><span>Bot</span><strong class="{bot_class}">{escape_html(bot_status)}</strong></div>
       <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
-      <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_status)}</strong></div>
-      <div class="card"><span>Lịch sử</span><strong>{len(all_history_entries)}/{settings_snapshot["alert_history_limit"]}</strong></div>
+      <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_health)}</strong></div>
+      <div class="card"><span>Lần cảnh báo</span><strong>{escape_html(last_alert_text)}</strong></div>
       <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
     </section>
 
     <section class="panel tab-panel">
-      <h2>Trạng thái</h2>
+      <h2>Sức khỏe hệ thống</h2>
       <table>
+        <tr><th>Bot</th><td>{escape_html(bot_status)}</td></tr>
+        <tr><th>Radar</th><td>{escape_html(radar_status)}</td></tr>
+        <tr><th>Camera</th><td>{escape_html(camera_health)} - {escape_html(camera_status)}</td></tr>
+        <tr><th>Lần cảnh báo gần nhất</th><td>{escape_html(last_alert_text)}</td></tr>
         <tr><th>Uptime</th><td>{escape_html(uptime)}</td></tr>
-        <tr><th>Cảnh báo gần nhất</th><td>{escape_html(ctx.format_timestamp(ctx.last_alert_timestamp()))}</td></tr>
         <tr><th>Dashboard local</th><td>{escape_html(ctx.url)}</td></tr>
       </table>
     </section>"""
@@ -979,7 +1000,7 @@ def render_dashboard_html(
     .tab-link {{ border: 1px solid var(--line); border-radius: 8px; color: var(--text); padding: 8px 11px; text-decoration: none; }}
     .tab-link.active {{ background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }}
     .tab-panel {{ margin-top: 16px; }}
-    .grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }}
     .card, .history-card, .panel {{
       background: var(--panel);
       border: 1px solid var(--line);
@@ -1035,6 +1056,9 @@ def render_dashboard_html(
     .notice {{ margin-bottom: 14px; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--panel); }}
     pre {{ white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; color: var(--muted); }}
     .empty {{ padding: 20px; color: var(--muted); }}
+    @media (max-width: 1100px) {{
+      .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    }}
     @media (max-width: 860px) {{
       .grid, .layout, .history {{ grid-template-columns: 1fr; }}
       header, main {{ padding-left: 14px; padding-right: 14px; }}

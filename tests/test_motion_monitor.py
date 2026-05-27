@@ -23,6 +23,13 @@ class MotionMonitorTests(unittest.TestCase):
         )
         return MotionMonitor(ctx)
 
+    class DummyCameraStream:
+        def __init__(self):
+            self.released = False
+
+        def release(self):
+            self.released = True
+
     def test_radar_state_and_camera_status_are_reported(self):
         monitor = self.make_monitor()
 
@@ -59,6 +66,21 @@ class MotionMonitorTests(unittest.TestCase):
         self.assertTrue(parse_person_filter_result("PERSON: một người đứng gần cửa"))
         self.assertFalse(parse_person_filter_result("NO_PERSON"))
         self.assertFalse(parse_person_filter_result("NO_PERSON: chỉ có rèm"))
+
+    def test_reset_camera_connection_releases_stream_and_marks_camera_offline(self):
+        monitor = self.make_monitor()
+        stream = self.DummyCameraStream()
+
+        camera_stream, active_camera_config, last_gray_frame = monitor._reset_camera_connection(
+            stream,
+            "Camera vừa rớt"
+        )
+
+        self.assertTrue(stream.released)
+        self.assertIsNone(camera_stream)
+        self.assertIsNone(active_camera_config)
+        self.assertIsNone(last_gray_frame)
+        self.assertEqual(monitor.get_camera_status(), (False, "Camera vừa rớt"))
 
 
 if __name__ == "__main__":
