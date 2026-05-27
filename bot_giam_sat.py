@@ -384,6 +384,9 @@ def create_dashboard_context():
         delete_alert_history_entry=delete_alert_history_entry,
         update_setting=update_setting,
         trim_alert_history=trim_alert_history,
+        list_backups=get_recent_backups,
+        restore_latest_settings_backup=restore_latest_settings_backup,
+        restore_latest_alert_history_backup=restore_latest_alert_history_backup,
         clamp_int=clamp_int,
         log_error=log_error
     )

@@ -1,0 +1,76 @@
+import unittest
+
+from vision_bot_core.dashboard_server import (
+    DashboardContext,
+    normalize_dashboard_tab,
+    render_dashboard_html,
+)
+from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
+
+
+def make_dashboard_context():
+    return DashboardContext(
+        host="127.0.0.1",
+        port=8765,
+        url="http://127.0.0.1:8765",
+        log_dir="logs",
+        settings_limits=SETTING_LIMITS,
+        setting_labels=SETTING_LABELS,
+        setting_units=SETTING_UNITS,
+        history_limit_choices=(10, 50, 100),
+        bot_start_time=0,
+        get_settings_snapshot=lambda: DEFAULT_SETTINGS.copy(),
+        get_alert_history_snapshot=lambda limit=None: [],
+        get_camera_status=lambda: (False, "Camera chưa kiểm tra"),
+        is_radar_active=lambda: False,
+        format_size=lambda size: f"{size} B",
+        get_directory_size=lambda path: 0,
+        format_duration=lambda seconds: "1s",
+        tail_error_log=lambda: "no error",
+        format_timestamp=lambda timestamp: f"time-{timestamp}",
+        last_alert_timestamp=lambda: None,
+        text_preview=lambda text, max_length=320: text or "",
+        is_safe_alert_media_path=lambda path: False,
+        absolute_from_base=lambda path: path,
+        delete_alert_history_entry=lambda alert_id: False,
+        update_setting=lambda name, value: None,
+        trim_alert_history=lambda limit: None,
+        list_backups=lambda limit=20: [
+            {
+                "label": "settings",
+                "reason": "before_setting",
+                "created_at": 1,
+                "size": 12,
+                "filename": "settings_before_setting.json",
+            },
+            {
+                "label": "alert_history",
+                "reason": "before_clear_history",
+                "created_at": 2,
+                "size": 24,
+                "filename": "alert_history_before_clear_history.json",
+            },
+        ],
+        restore_latest_settings_backup=lambda: None,
+        restore_latest_alert_history_backup=lambda: None,
+        clamp_int=lambda value, default, min_value, max_value: default,
+        log_error=lambda context, error=None: None,
+    )
+
+
+class DashboardServerTests(unittest.TestCase):
+    def test_backup_tab_is_valid_dashboard_tab(self):
+        self.assertEqual(normalize_dashboard_tab("backups"), "backups")
+
+    def test_render_backup_tab_shows_backups_and_restore_forms(self):
+        html = render_dashboard_html(make_dashboard_context(), active_tab="backups")
+
+        self.assertIn("Backup", html)
+        self.assertIn("settings_before_setting.json", html)
+        self.assertIn("alert_history_before_clear_history.json", html)
+        self.assertIn('/restore-settings-backup', html)
+        self.assertIn('/restore-history-backup', html)
+
+
+if __name__ == "__main__":
+    unittest.main()

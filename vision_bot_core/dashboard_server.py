@@ -35,6 +35,9 @@ class DashboardContext:
     delete_alert_history_entry: object
     update_setting: object
     trim_alert_history: object
+    list_backups: object
+    restore_latest_settings_backup: object
+    restore_latest_alert_history_backup: object
     clamp_int: object
     log_error: object
 
@@ -43,6 +46,7 @@ DASHBOARD_TABS = (
     ("status", "Trạng thái"),
     ("history", "Lịch sử"),
     ("settings", "Setting"),
+    ("backups", "Backup"),
     ("errors", "Log lỗi")
 )
 DASHBOARD_TAB_KEYS = {key for key, _ in DASHBOARD_TABS}
@@ -279,6 +283,59 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
     )
 
 
+def backup_label_text(label):
+    labels = {
+        "settings": "Setting",
+        "alert_history": "Lịch sử",
+    }
+    return labels.get(str(label), str(label).replace("_", " "))
+
+
+def render_dashboard_backup_actions():
+    return """
+    <div class="backup-actions">
+      <form method="post" action="/restore-settings-backup" onsubmit="return confirm('Khôi phục setting từ backup gần nhất? Setting hiện tại sẽ được backup trước khi ghi đè.')">
+        <button class="save-button" type="submit">Khôi phục setting gần nhất</button>
+      </form>
+      <form method="post" action="/restore-history-backup" onsubmit="return confirm('Khôi phục lịch sử từ backup gần nhất? Lịch sử hiện tại sẽ được backup trước khi ghi đè.')">
+        <button class="secondary-button" type="submit">Khôi phục lịch sử gần nhất</button>
+      </form>
+    </div>
+    """
+
+
+def render_dashboard_backups(ctx, backups):
+    actions = render_dashboard_backup_actions()
+    if not backups:
+        return (
+            f"{actions}"
+            '<section class="empty">Chưa có backup nào trong logs/backups.</section>'
+        )
+
+    rows = []
+    for backup in backups:
+        rows.append(
+            "<tr>"
+            f"<td>{escape_html(backup_label_text(backup.get('label', 'unknown')))}</td>"
+            f"<td>{escape_html(str(backup.get('reason', 'unknown')).replace('_', ' '))}</td>"
+            f"<td>{escape_html(ctx.format_timestamp(backup.get('created_at')))}</td>"
+            f"<td>{escape_html(ctx.format_size(backup.get('size', 0)))}</td>"
+            f"<td><code>{escape_html(backup.get('filename', ''))}</code></td>"
+            "</tr>"
+        )
+
+    return (
+        f"{actions}"
+        '<p class="setting-note">Backup chỉ lưu file JSON cấu hình/lịch sử. Ảnh và video cảnh báo không được copy vào backup.</p>'
+        '<div class="table-scroll">'
+        "<table>"
+        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+
 def bool_from_dashboard(value, default):
     if value is None:
         return default
@@ -329,6 +386,8 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
     uptime = ctx.format_duration(time.time() - ctx.bot_start_time)
     error_log = escape_html(ctx.tail_error_log())
     settings_form = render_dashboard_settings_form(ctx, settings_snapshot)
+    backups = ctx.list_backups(limit=20)
+    backups_content = render_dashboard_backups(ctx, backups)
 
     notice_html = ""
     if notice:
@@ -363,6 +422,11 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
       <h2>Setting</h2>
       {settings_form}
     </section>"""
+    backups_content = f"""
+    <section class="panel tab-panel">
+      <h2>Backup</h2>
+      {backups_content}
+    </section>"""
     errors_content = f"""
     <section class="panel tab-panel">
       <h2>Log lỗi gần nhất</h2>
@@ -372,6 +436,7 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
         "status": status_content,
         "history": history_content,
         "settings": settings_content,
+        "backups": backups_content,
         "errors": errors_content
     }[active_tab]
 
@@ -454,6 +519,12 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
     .setting-hint {{ display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }}
     .setting-note {{ color: var(--muted); margin: 12px 0 0; }}
     .save-button {{ margin-top: 12px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 9px 13px; }}
+    .secondary-button {{ margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; font: inherit; font-weight: 700; padding: 9px 13px; }}
+    .backup-actions {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }}
+    .backup-actions form {{ margin: 0; }}
+    .backup-actions .save-button, .backup-actions .secondary-button {{ margin-top: 0; }}
+    .table-scroll {{ overflow-x: auto; }}
+    code {{ font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }}
     .delete-form {{ margin: 0; }}
     .delete-button {{ border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--bad); cursor: pointer; font: inherit; font-weight: 700; padding: 5px 9px; }}
     .delete-button:hover {{ border-color: var(--bad); }}
@@ -596,6 +667,19 @@ def make_dashboard_handler(ctx):
                     notice = "Không tìm thấy cảnh báo để xóa."
                 elif query.get("saved") == ["1"]:
                     notice = "Đã lưu setting."
+                elif query.get("restore_settings") == ["1"]:
+                    notice = "Đã khôi phục setting từ backup gần nhất."
+                elif query.get("restore_settings") == ["0"]:
+                    notice = "Chưa có backup setting để khôi phục."
+                elif query.get("restore_settings") == ["error"]:
+                    notice = "Không thể khôi phục setting. Xem tab Log lỗi để biết chi tiết."
+                elif query.get("restore_history") == ["1"]:
+                    count = query.get("count", ["0"])[0]
+                    notice = f"Đã khôi phục {count} cảnh báo từ backup lịch sử gần nhất."
+                elif query.get("restore_history") == ["0"]:
+                    notice = "Chưa có backup lịch sử để khôi phục."
+                elif query.get("restore_history") == ["error"]:
+                    notice = "Không thể khôi phục lịch sử. Xem tab Log lỗi để biết chi tiết."
 
                 body = render_dashboard_html(ctx, notice, history_filter, active_tab).encode("utf-8")
                 self.send_response(200)
@@ -625,6 +709,32 @@ def make_dashboard_handler(ctx):
             if parsed_url.path == "/update-settings":
                 update_dashboard_settings(ctx, form)
                 redirect_dashboard(self, "/?" + urlencode({"tab": "settings", "saved": "1"}))
+                return
+
+            if parsed_url.path == "/restore-settings-backup":
+                try:
+                    restored = ctx.restore_latest_settings_backup()
+                    status = "1" if restored is not None else "0"
+                except Exception as e:
+                    ctx.log_error("Dashboard khoi phuc setting that bai", e)
+                    status = "error"
+                redirect_dashboard(self, "/?" + urlencode({"tab": "backups", "restore_settings": status}))
+                return
+
+            if parsed_url.path == "/restore-history-backup":
+                count = "0"
+                try:
+                    restored = ctx.restore_latest_alert_history_backup()
+                    status = "1" if restored is not None else "0"
+                    if restored is not None:
+                        count = str(restored.get("restored_count", 0))
+                except Exception as e:
+                    ctx.log_error("Dashboard khoi phuc lich su canh bao that bai", e)
+                    status = "error"
+                redirect_dashboard(
+                    self,
+                    "/?" + urlencode({"tab": "backups", "restore_history": status, "count": count})
+                )
                 return
 
             if parsed_url.path != "/delete-alert":
