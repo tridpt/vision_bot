@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from vision_bot_core.dashboard_server import (
     DashboardContext,
@@ -8,7 +11,7 @@ from vision_bot_core.dashboard_server import (
 from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
 
 
-def make_dashboard_context():
+def make_dashboard_context(settings_backup_path="", history_backup_path=""):
     return DashboardContext(
         host="127.0.0.1",
         port=8765,
@@ -42,6 +45,7 @@ def make_dashboard_context():
                 "created_at": 1,
                 "size": 12,
                 "filename": "settings_before_setting.json",
+                "path": settings_backup_path,
             },
             {
                 "label": "alert_history",
@@ -49,6 +53,7 @@ def make_dashboard_context():
                 "created_at": 2,
                 "size": 24,
                 "filename": "alert_history_before_clear_history.json",
+                "path": history_backup_path,
             },
         ],
         restore_latest_settings_backup=lambda: None,
@@ -70,6 +75,46 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("alert_history_before_clear_history.json", html)
         self.assertIn('/restore-settings-backup', html)
         self.assertIn('/restore-history-backup', html)
+        self.assertIn("Xem nội dung", html)
+
+    def test_render_settings_backup_detail_shows_setting_values(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backup_path = Path(temp_dir) / "settings_before_setting.json"
+            backup_path.write_text(json.dumps({
+                "motion_area_threshold": 1234,
+                "alert_cooldown_seconds": 30,
+                "send_video": False,
+            }), encoding="utf-8")
+
+            html = render_dashboard_html(
+                make_dashboard_context(settings_backup_path=str(backup_path)),
+                active_tab="backups",
+                backup_filename="settings_before_setting.json",
+            )
+
+            self.assertIn("Nội dung backup", html)
+            self.assertIn("1234", html)
+            self.assertIn("Gửi video cảnh báo", html)
+            self.assertIn("TẮT", html)
+
+    def test_render_history_backup_detail_shows_summary_and_preview(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backup_path = Path(temp_dir) / "alert_history_before_clear_history.json"
+            backup_path.write_text(json.dumps([
+                {"timestamp": 2, "video_status": "Có video", "analysis": "motion one"},
+                {"timestamp": 1, "video_status": "Không có video", "analysis": "motion two"},
+            ]), encoding="utf-8")
+
+            html = render_dashboard_html(
+                make_dashboard_context(history_backup_path=str(backup_path)),
+                active_tab="backups",
+                backup_filename="alert_history_before_clear_history.json",
+            )
+
+            self.assertIn("Số cảnh báo", html)
+            self.assertIn("2", html)
+            self.assertIn("motion one", html)
+            self.assertIn("time-2.0", html)
 
 
 if __name__ == "__main__":

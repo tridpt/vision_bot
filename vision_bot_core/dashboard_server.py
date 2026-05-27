@@ -1,4 +1,5 @@
 import html
+import json
 import mimetypes
 import os
 import threading
@@ -140,6 +141,10 @@ def filter_dashboard_history(ctx, entries, history_filter):
 
 def dashboard_filter_url(history_filter):
     return "/?" + urlencode({"tab": "history", "filter": history_filter})
+
+
+def dashboard_backup_detail_url(filename):
+    return "/?" + urlencode({"tab": "backups", "backup": filename})
 
 
 def render_dashboard_filter_controls(active_filter, shown_count, total_count):
@@ -291,6 +296,150 @@ def backup_label_text(label):
     return labels.get(str(label), str(label).replace("_", " "))
 
 
+def backup_detail_title(backup):
+    return (
+        f"{backup_label_text(backup.get('label', 'unknown'))} - "
+        f"{backup.get('filename', '')}"
+    )
+
+
+def find_dashboard_backup(backups, filename):
+    if not filename:
+        return None
+    for backup in backups:
+        if backup.get("filename") == filename:
+            return backup
+    return None
+
+
+def load_dashboard_backup_json(ctx, backup):
+    backup_path = backup.get("path")
+    if not backup_path or not os.path.isfile(backup_path):
+        return None, "File backup không còn tồn tại."
+
+    try:
+        with open(backup_path, "r", encoding="utf-8") as file:
+            return json.load(file), ""
+    except (OSError, json.JSONDecodeError) as e:
+        ctx.log_error(f"Dashboard khong doc duoc backup: {backup_path}", e)
+        return None, "Không đọc được nội dung backup. Xem tab Log lỗi để biết chi tiết."
+
+
+def render_settings_backup_detail(ctx, data):
+    if not isinstance(data, dict):
+        return '<p class="empty">Backup setting không đúng định dạng.</p>'
+
+    labels = {
+        **ctx.setting_labels,
+        "send_video": "Gửi video cảnh báo",
+        "use_gemini_analysis": "Phân tích Gemini",
+    }
+    ordered_keys = [
+        "motion_area_threshold",
+        "alert_cooldown_seconds",
+        "alert_video_seconds",
+        "alert_video_fps",
+        "send_video",
+        "use_gemini_analysis",
+        "alert_history_limit",
+    ]
+    extra_keys = sorted(key for key in data if key not in ordered_keys)
+    rows = []
+    for key in ordered_keys + extra_keys:
+        if key not in data:
+            continue
+        value = data[key]
+        if isinstance(value, bool):
+            value = "BẬT" if value else "TẮT"
+        rows.append(
+            "<tr>"
+            f"<th>{escape_html(labels.get(key, key))}</th>"
+            f"<td>{escape_html(value)}</td>"
+            "</tr>"
+        )
+
+    if not rows:
+        return '<p class="empty">Backup setting không có giá trị nào.</p>'
+    return f"<table>{''.join(rows)}</table>"
+
+
+def render_history_backup_detail(ctx, data):
+    if not isinstance(data, list):
+        return '<p class="empty">Backup lịch sử không đúng định dạng.</p>'
+
+    entries = [entry for entry in data if isinstance(entry, dict)]
+    if entries:
+        latest_timestamp = max(alert_timestamp_value(entry) for entry in entries)
+        latest_text = ctx.format_timestamp(latest_timestamp) if latest_timestamp else "Không có timestamp"
+    else:
+        latest_text = "Không có cảnh báo"
+
+    rows = []
+    for entry in entries[:5]:
+        rows.append(
+            "<tr>"
+            f"<td>{escape_html(ctx.format_timestamp(entry.get('timestamp')))}</td>"
+            f"<td>{escape_html(entry.get('video_status') or 'Không có video')}</td>"
+            f"<td>{escape_html(ctx.text_preview(entry.get('analysis'), max_length=180))}</td>"
+            "</tr>"
+        )
+
+    preview_table = '<p class="empty">Backup không có cảnh báo nào.</p>'
+    if rows:
+        preview_table = (
+            "<table>"
+            "<thead><tr><th>Thời gian</th><th>Video</th><th>Gemini</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody>"
+            "</table>"
+        )
+
+    return (
+        '<div class="backup-summary">'
+        f"<p><strong>Số cảnh báo:</strong> {len(entries)}</p>"
+        f"<p><strong>Cảnh báo gần nhất:</strong> {escape_html(latest_text)}</p>"
+        "</div>"
+        f"{preview_table}"
+    )
+
+
+def render_generic_backup_detail(data):
+    compact = json.dumps(data, ensure_ascii=False, indent=2)
+    if len(compact) > 4000:
+        compact = f"{compact[:4000]}\n..."
+    return f"<pre>{escape_html(compact)}</pre>"
+
+
+def render_dashboard_backup_detail(ctx, backups, selected_filename):
+    if not selected_filename:
+        return ""
+
+    backup = find_dashboard_backup(backups, selected_filename)
+    if backup is None:
+        return (
+            '<section class="backup-detail">'
+            "<h3>Nội dung backup</h3>"
+            '<p class="empty">Không tìm thấy backup trong danh sách hiện tại.</p>'
+            "</section>"
+        )
+
+    data, error = load_dashboard_backup_json(ctx, backup)
+    if error:
+        detail_html = f'<p class="empty">{escape_html(error)}</p>'
+    elif backup.get("label") == "settings":
+        detail_html = render_settings_backup_detail(ctx, data)
+    elif backup.get("label") == "alert_history":
+        detail_html = render_history_backup_detail(ctx, data)
+    else:
+        detail_html = render_generic_backup_detail(data)
+
+    return (
+        '<section class="backup-detail">'
+        f"<h3>Nội dung backup: {escape_html(backup_detail_title(backup))}</h3>"
+        f"{detail_html}"
+        "</section>"
+    )
+
+
 def render_dashboard_backup_actions():
     return """
     <div class="backup-actions">
@@ -304,7 +453,7 @@ def render_dashboard_backup_actions():
     """
 
 
-def render_dashboard_backups(ctx, backups):
+def render_dashboard_backups(ctx, backups, selected_filename=""):
     actions = render_dashboard_backup_actions()
     if not backups:
         return (
@@ -312,24 +461,32 @@ def render_dashboard_backups(ctx, backups):
             '<section class="empty">Chưa có backup nào trong logs/backups.</section>'
         )
 
+    detail_html = render_dashboard_backup_detail(ctx, backups, selected_filename)
     rows = []
     for backup in backups:
+        filename = backup.get("filename", "")
+        detail_link = (
+            f'<a class="media-link" href="{dashboard_backup_detail_url(filename)}">Xem nội dung</a>'
+            if filename else ""
+        )
         rows.append(
             "<tr>"
             f"<td>{escape_html(backup_label_text(backup.get('label', 'unknown')))}</td>"
             f"<td>{escape_html(str(backup.get('reason', 'unknown')).replace('_', ' '))}</td>"
             f"<td>{escape_html(ctx.format_timestamp(backup.get('created_at')))}</td>"
             f"<td>{escape_html(ctx.format_size(backup.get('size', 0)))}</td>"
-            f"<td><code>{escape_html(backup.get('filename', ''))}</code></td>"
+            f"<td><code>{escape_html(filename)}</code></td>"
+            f"<td>{detail_link}</td>"
             "</tr>"
         )
 
     return (
         f"{actions}"
+        f"{detail_html}"
         '<p class="setting-note">Backup chỉ lưu file JSON cấu hình/lịch sử. Ảnh và video cảnh báo không được copy vào backup.</p>'
         '<div class="table-scroll">'
         "<table>"
-        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th></tr></thead>"
+        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th><th>Nội dung</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         "</table>"
         "</div>"
@@ -369,7 +526,7 @@ def update_dashboard_settings(ctx, form):
         ctx.trim_alert_history(updates["alert_history_limit"])
 
 
-def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="status"):
+def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="status", backup_filename=""):
     active_tab = normalize_dashboard_tab(active_tab)
     history_filter = normalize_dashboard_history_filter(history_filter)
     settings_snapshot = ctx.get_settings_snapshot()
@@ -387,7 +544,7 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
     error_log = escape_html(ctx.tail_error_log())
     settings_form = render_dashboard_settings_form(ctx, settings_snapshot)
     backups = ctx.list_backups(limit=20)
-    backups_content = render_dashboard_backups(ctx, backups)
+    backups_content = render_dashboard_backups(ctx, backups, backup_filename)
 
     notice_html = ""
     if notice:
@@ -523,6 +680,10 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
     .backup-actions {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }}
     .backup-actions form {{ margin: 0; }}
     .backup-actions .save-button, .backup-actions .secondary-button {{ margin-top: 0; }}
+    .backup-detail {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; }}
+    .backup-detail h3 {{ font-size: 15px; margin: 0 0 10px; }}
+    .backup-summary {{ display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); }}
+    .backup-summary p {{ margin: 0 0 8px; }}
     .table-scroll {{ overflow-x: auto; }}
     code {{ font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }}
     .delete-form {{ margin: 0; }}
@@ -660,6 +821,7 @@ def make_dashboard_handler(ctx):
                 query = parse_qs(parsed_url.query)
                 active_tab = normalize_dashboard_tab(query.get("tab", ["status"])[0])
                 history_filter = normalize_dashboard_history_filter(query.get("filter", ["all"])[0])
+                backup_filename = query.get("backup", [""])[0]
                 notice = ""
                 if query.get("deleted") == ["1"]:
                     notice = "Đã xóa cảnh báo."
@@ -681,7 +843,13 @@ def make_dashboard_handler(ctx):
                 elif query.get("restore_history") == ["error"]:
                     notice = "Không thể khôi phục lịch sử. Xem tab Log lỗi để biết chi tiết."
 
-                body = render_dashboard_html(ctx, notice, history_filter, active_tab).encode("utf-8")
+                body = render_dashboard_html(
+                    ctx,
+                    notice,
+                    history_filter,
+                    active_tab,
+                    backup_filename
+                ).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
