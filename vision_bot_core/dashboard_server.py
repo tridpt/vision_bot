@@ -64,6 +64,14 @@ DASHBOARD_HISTORY_FILTERS = (
 )
 DASHBOARD_HISTORY_FILTER_KEYS = {key for key, _ in DASHBOARD_HISTORY_FILTERS}
 
+DASHBOARD_BACKUP_FILTERS = (
+    ("all", "Tất cả"),
+    ("settings", "Setting"),
+    ("history", "Lịch sử"),
+    ("newest", "Mới nhất")
+)
+DASHBOARD_BACKUP_FILTER_KEYS = {key for key, _ in DASHBOARD_BACKUP_FILTERS}
+
 
 def escape_html(value):
     return html.escape(str(value), quote=True)
@@ -87,20 +95,28 @@ def normalize_dashboard_history_filter(history_filter):
     return "all"
 
 
-def dashboard_tab_url(tab, history_filter="all"):
+def normalize_dashboard_backup_filter(backup_filter):
+    if backup_filter in DASHBOARD_BACKUP_FILTER_KEYS:
+        return backup_filter
+    return "all"
+
+
+def dashboard_tab_url(tab, history_filter="all", backup_filter="all"):
     params = {"tab": normalize_dashboard_tab(tab)}
     if params["tab"] == "history":
         params["filter"] = normalize_dashboard_history_filter(history_filter)
+    if params["tab"] == "backups":
+        params["backup_filter"] = normalize_dashboard_backup_filter(backup_filter)
     return "/?" + urlencode(params)
 
 
-def render_dashboard_tabs(active_tab, history_filter="all"):
+def render_dashboard_tabs(active_tab, history_filter="all", backup_filter="all"):
     links = []
     active_tab = normalize_dashboard_tab(active_tab)
     for tab_key, label in DASHBOARD_TABS:
         active_class = " active" if tab_key == active_tab else ""
         links.append(
-            f'<a class="tab-link{active_class}" href="{dashboard_tab_url(tab_key, history_filter)}">'
+            f'<a class="tab-link{active_class}" href="{dashboard_tab_url(tab_key, history_filter, backup_filter)}">'
             f"{escape_html(label)}</a>"
         )
     return f'<nav class="tabs">{"".join(links)}</nav>'
@@ -146,8 +162,12 @@ def dashboard_filter_url(history_filter):
     return "/?" + urlencode({"tab": "history", "filter": history_filter})
 
 
-def dashboard_backup_detail_url(filename):
-    return "/?" + urlencode({"tab": "backups", "backup": filename})
+def dashboard_backup_detail_url(filename, backup_filter="all"):
+    return "/?" + urlencode({
+        "tab": "backups",
+        "backup_filter": normalize_dashboard_backup_filter(backup_filter),
+        "backup": filename
+    })
 
 
 def render_dashboard_filter_controls(active_filter, shown_count, total_count):
@@ -156,6 +176,44 @@ def render_dashboard_filter_controls(active_filter, shown_count, total_count):
         active_class = " active" if filter_key == active_filter else ""
         links.append(
             f'<a class="filter-link{active_class}" href="{dashboard_filter_url(filter_key)}">'
+            f"{escape_html(label)}</a>"
+        )
+
+    return (
+        '<div class="filter-bar">'
+        '<div class="filter-links">'
+        f"{''.join(links)}"
+        "</div>"
+        f'<span class="filter-count">Đang hiển thị {shown_count}/{total_count}</span>'
+        "</div>"
+    )
+
+
+def filter_dashboard_backups(backups, backup_filter):
+    backup_filter = normalize_dashboard_backup_filter(backup_filter)
+    if backup_filter == "settings":
+        return [backup for backup in backups if backup.get("label") == "settings"]
+    if backup_filter == "history":
+        return [backup for backup in backups if backup.get("label") == "alert_history"]
+    if backup_filter == "newest":
+        return backups[:10]
+    return backups
+
+
+def dashboard_backup_filter_url(backup_filter):
+    return "/?" + urlencode({
+        "tab": "backups",
+        "backup_filter": normalize_dashboard_backup_filter(backup_filter)
+    })
+
+
+def render_dashboard_backup_filter_controls(active_filter, shown_count, total_count):
+    links = []
+    active_filter = normalize_dashboard_backup_filter(active_filter)
+    for filter_key, label in DASHBOARD_BACKUP_FILTERS:
+        active_class = " active" if filter_key == active_filter else ""
+        links.append(
+            f'<a class="filter-link{active_class}" href="{dashboard_backup_filter_url(filter_key)}">'
             f"{escape_html(label)}</a>"
         )
 
@@ -496,7 +554,7 @@ def render_dashboard_backup_actions():
     """
 
 
-def render_selected_backup_restore_form(backup):
+def render_selected_backup_restore_form(backup, active_filter="all"):
     filename = backup.get("filename", "")
     label = backup.get("label")
     if not filename or label not in ("settings", "alert_history"):
@@ -504,48 +562,65 @@ def render_selected_backup_restore_form(backup):
 
     button_label = "Khôi phục file này"
     confirm_text = "Khôi phục backup này? Trạng thái hiện tại sẽ được backup trước khi ghi đè."
+    active_filter = normalize_dashboard_backup_filter(active_filter)
     return (
         '<form class="inline-form" method="post" action="/restore-selected-backup" '
         f'onsubmit="return confirm(\'{escape_html(confirm_text)}\')">'
         f'<input type="hidden" name="filename" value="{escape_html(filename)}">'
+        f'<input type="hidden" name="backup_filter" value="{escape_html(active_filter)}">'
         f'<button class="table-action-button" type="submit">{escape_html(button_label)}</button>'
         "</form>"
     )
 
 
-def render_selected_backup_delete_form(backup):
+def render_selected_backup_delete_form(backup, active_filter="all"):
     filename = backup.get("filename", "")
     if not filename:
         return ""
 
     confirm_text = "Xóa backup này? Thao tác này chỉ xóa file JSON backup đã chọn."
+    active_filter = normalize_dashboard_backup_filter(active_filter)
     return (
         '<form class="inline-form" method="post" action="/delete-backup" '
         f'onsubmit="return confirm(\'{escape_html(confirm_text)}\')">'
         f'<input type="hidden" name="filename" value="{escape_html(filename)}">'
+        f'<input type="hidden" name="backup_filter" value="{escape_html(active_filter)}">'
         '<button class="delete-button" type="submit">Xóa</button>'
         "</form>"
     )
 
 
-def render_dashboard_backups(ctx, backups, selected_filename=""):
+def render_dashboard_backups(ctx, backups, selected_filename="", active_filter="all"):
     actions = render_dashboard_backup_actions()
-    if not backups:
+    filtered_backups = filter_dashboard_backups(backups, active_filter)
+    filter_controls = render_dashboard_backup_filter_controls(
+        active_filter,
+        len(filtered_backups),
+        len(backups)
+    )
+
+    if not filtered_backups:
+        empty_text = (
+            "Chưa có backup nào trong logs/backups."
+            if not backups else
+            "Không có backup nào theo bộ lọc này."
+        )
         return (
             f"{actions}"
-            '<section class="empty">Chưa có backup nào trong logs/backups.</section>'
+            f"{filter_controls}"
+            f'<section class="empty">{empty_text}</section>'
         )
 
-    detail_html = render_dashboard_backup_detail(ctx, backups, selected_filename)
+    detail_html = render_dashboard_backup_detail(ctx, filtered_backups, selected_filename)
     rows = []
-    for backup in backups:
+    for backup in filtered_backups:
         filename = backup.get("filename", "")
         detail_link = (
-            f'<a class="media-link" href="{dashboard_backup_detail_url(filename)}">Xem nội dung</a>'
+            f'<a class="media-link" href="{dashboard_backup_detail_url(filename, active_filter)}">Xem nội dung</a>'
             if filename else ""
         )
-        restore_form = render_selected_backup_restore_form(backup)
-        delete_form = render_selected_backup_delete_form(backup)
+        restore_form = render_selected_backup_restore_form(backup, active_filter)
+        delete_form = render_selected_backup_delete_form(backup, active_filter)
         rows.append(
             "<tr>"
             f"<td>{escape_html(backup_label_text(backup.get('label', 'unknown')))}</td>"
@@ -561,6 +636,7 @@ def render_dashboard_backups(ctx, backups, selected_filename=""):
 
     return (
         f"{actions}"
+        f"{filter_controls}"
         f"{detail_html}"
         '<p class="setting-note">Backup chỉ lưu file JSON cấu hình/lịch sử. Ảnh và video cảnh báo không được copy vào backup.</p>'
         '<div class="table-scroll">'
@@ -605,9 +681,17 @@ def update_dashboard_settings(ctx, form):
         ctx.trim_alert_history(updates["alert_history_limit"])
 
 
-def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="status", backup_filename=""):
+def render_dashboard_html(
+    ctx,
+    notice="",
+    history_filter="all",
+    active_tab="status",
+    backup_filename="",
+    backup_filter="all"
+):
     active_tab = normalize_dashboard_tab(active_tab)
     history_filter = normalize_dashboard_history_filter(history_filter)
+    backup_filter = normalize_dashboard_backup_filter(backup_filter)
     settings_snapshot = ctx.get_settings_snapshot()
     all_history_entries = ctx.get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
     history_entries = filter_dashboard_history(ctx, all_history_entries, history_filter)
@@ -623,14 +707,14 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
     error_log = escape_html(ctx.tail_error_log())
     settings_form = render_dashboard_settings_form(ctx, settings_snapshot)
     backups = ctx.list_backups(limit=20)
-    backups_content = render_dashboard_backups(ctx, backups, backup_filename)
+    backups_content = render_dashboard_backups(ctx, backups, backup_filename, backup_filter)
 
     notice_html = ""
     if notice:
         notice_html = f'<section class="notice">{escape_html(notice)}</section>'
 
     camera_class = "ok" if camera_ok else "bad"
-    tabs_html = render_dashboard_tabs(active_tab, history_filter)
+    tabs_html = render_dashboard_tabs(active_tab, history_filter, backup_filter)
     status_content = f"""
     <section class="grid">
       <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
@@ -902,6 +986,7 @@ def make_dashboard_handler(ctx):
                 query = parse_qs(parsed_url.query)
                 active_tab = normalize_dashboard_tab(query.get("tab", ["status"])[0])
                 history_filter = normalize_dashboard_history_filter(query.get("filter", ["all"])[0])
+                backup_filter = normalize_dashboard_backup_filter(query.get("backup_filter", ["all"])[0])
                 backup_filename = query.get("backup", [""])[0]
                 notice = ""
                 if query.get("deleted") == ["1"]:
@@ -950,7 +1035,8 @@ def make_dashboard_handler(ctx):
                     notice,
                     history_filter,
                     active_tab,
-                    backup_filename
+                    backup_filename,
+                    backup_filter
                 ).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1009,6 +1095,7 @@ def make_dashboard_handler(ctx):
 
             if parsed_url.path == "/restore-selected-backup":
                 filename = form.get("filename", [""])[0]
+                backup_filter = normalize_dashboard_backup_filter(form.get("backup_filter", ["all"])[0])
                 try:
                     restored = restore_selected_dashboard_backup(ctx, filename)
                 except Exception as e:
@@ -1022,6 +1109,7 @@ def make_dashboard_handler(ctx):
                     self,
                     "/?" + urlencode({
                         "tab": "backups",
+                        "backup_filter": backup_filter,
                         "backup": filename,
                         "restore_selected": restored["status"],
                         "kind": restored["kind"],
@@ -1032,6 +1120,7 @@ def make_dashboard_handler(ctx):
 
             if parsed_url.path == "/delete-backup":
                 filename = form.get("filename", [""])[0]
+                backup_filter = normalize_dashboard_backup_filter(form.get("backup_filter", ["all"])[0])
                 try:
                     deleted = delete_selected_dashboard_backup(ctx, filename)
                     status = "1" if deleted else "0"
@@ -1040,7 +1129,11 @@ def make_dashboard_handler(ctx):
                     status = "error"
                 redirect_dashboard(
                     self,
-                    "/?" + urlencode({"tab": "backups", "deleted_backup": status})
+                    "/?" + urlencode({
+                        "tab": "backups",
+                        "backup_filter": backup_filter,
+                        "deleted_backup": status
+                    })
                 )
                 return
 

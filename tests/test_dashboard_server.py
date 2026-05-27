@@ -92,6 +92,31 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('/delete-backup', html)
         self.assertIn("Xem nội dung", html)
         self.assertIn("Khôi phục file này", html)
+        self.assertIn("Đang hiển thị 2/2", html)
+
+    def test_render_backup_tab_filters_by_settings(self):
+        html = render_dashboard_html(
+            make_dashboard_context(),
+            active_tab="backups",
+            backup_filter="settings",
+        )
+
+        self.assertIn("settings_before_setting.json", html)
+        self.assertNotIn("alert_history_before_clear_history.json", html)
+        self.assertIn("Đang hiển thị 1/2", html)
+        self.assertIn("backup_filter=settings", html)
+
+    def test_render_backup_tab_filters_by_history(self):
+        html = render_dashboard_html(
+            make_dashboard_context(),
+            active_tab="backups",
+            backup_filter="history",
+        )
+
+        self.assertNotIn("settings_before_setting.json", html)
+        self.assertIn("alert_history_before_clear_history.json", html)
+        self.assertIn("Đang hiển thị 1/2", html)
+        self.assertIn("backup_filter=history", html)
 
     def test_render_settings_backup_detail_shows_setting_values(self):
         with tempfile.TemporaryDirectory() as temp_dir:
