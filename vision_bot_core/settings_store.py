@@ -4,6 +4,8 @@ import threading
 
 
 HISTORY_LIMIT_CHOICES = (10, 50, 100)
+CAMERA_INDEX_CHOICES = (0, 1, 2)
+CAMERA_ROTATION_CHOICES = (0, 90, 180, 270)
 
 DEFAULT_SETTINGS = {
     "motion_area_threshold": 8000,
@@ -12,7 +14,12 @@ DEFAULT_SETTINGS = {
     "alert_video_fps": 10,
     "send_video": True,
     "use_gemini_analysis": True,
-    "alert_history_limit": 50
+    "alert_history_limit": 50,
+    "camera_index": 0,
+    "camera_width": 0,
+    "camera_height": 0,
+    "camera_fps": 0,
+    "camera_rotation": 0
 }
 
 SETTING_LIMITS = {
@@ -20,7 +27,18 @@ SETTING_LIMITS = {
     "alert_cooldown_seconds": (3, 3600),
     "alert_video_seconds": (5, 10),
     "alert_video_fps": (5, 30),
-    "alert_history_limit": (10, 100)
+    "alert_history_limit": (10, 100),
+    "camera_index": (0, 2),
+    "camera_width": (0, 3840),
+    "camera_height": (0, 2160),
+    "camera_fps": (0, 60),
+    "camera_rotation": (0, 270)
+}
+
+SETTING_CHOICES = {
+    "alert_history_limit": HISTORY_LIMIT_CHOICES,
+    "camera_index": CAMERA_INDEX_CHOICES,
+    "camera_rotation": CAMERA_ROTATION_CHOICES
 }
 
 SETTING_LABELS = {
@@ -28,7 +46,12 @@ SETTING_LABELS = {
     "alert_cooldown_seconds": "cooldown cảnh báo",
     "alert_video_seconds": "độ dài video",
     "alert_video_fps": "FPS video",
-    "alert_history_limit": "số cảnh báo giữ trong lịch sử"
+    "alert_history_limit": "số cảnh báo giữ trong lịch sử",
+    "camera_index": "camera index",
+    "camera_width": "chiều rộng camera",
+    "camera_height": "chiều cao camera",
+    "camera_fps": "FPS camera",
+    "camera_rotation": "góc xoay camera"
 }
 
 SETTING_UNITS = {
@@ -36,7 +59,12 @@ SETTING_UNITS = {
     "alert_cooldown_seconds": " giây",
     "alert_video_seconds": " giây",
     "alert_video_fps": "",
-    "alert_history_limit": " cảnh báo"
+    "alert_history_limit": " cảnh báo",
+    "camera_index": "",
+    "camera_width": " px",
+    "camera_height": " px",
+    "camera_fps": " fps",
+    "camera_rotation": " độ"
 }
 
 SETTING_EXAMPLES = {
@@ -44,7 +72,12 @@ SETTING_EXAMPLES = {
     "alert_cooldown_seconds": "20",
     "alert_video_seconds": "7",
     "alert_video_fps": "10",
-    "alert_history_limit": "50"
+    "alert_history_limit": "50",
+    "camera_index": "0",
+    "camera_width": "1280",
+    "camera_height": "720",
+    "camera_fps": "30",
+    "camera_rotation": "180"
 }
 
 _settings_file = None
@@ -77,6 +110,10 @@ def normalize_bool(value, default):
     return default
 
 
+def snap_to_choice(value, choices):
+    return min(choices, key=lambda choice: abs(choice - value))
+
+
 def normalize_settings(raw_settings):
     normalized = DEFAULT_SETTINGS.copy()
     if isinstance(raw_settings, dict):
@@ -85,11 +122,9 @@ def normalize_settings(raw_settings):
     for key, (min_value, max_value) in SETTING_LIMITS.items():
         normalized[key] = clamp_int(normalized[key], DEFAULT_SETTINGS[key], min_value, max_value)
 
-    if normalized["alert_history_limit"] not in HISTORY_LIMIT_CHOICES:
-        normalized["alert_history_limit"] = min(
-            HISTORY_LIMIT_CHOICES,
-            key=lambda choice: abs(choice - normalized["alert_history_limit"])
-        )
+    for key, choices in SETTING_CHOICES.items():
+        if normalized[key] not in choices:
+            normalized[key] = snap_to_choice(normalized[key], choices)
 
     normalized["send_video"] = normalize_bool(
         normalized["send_video"],

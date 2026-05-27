@@ -251,7 +251,13 @@ bot.set_my_commands([
     telebot.types.BotCommand("/menu", "Mở menu điều khiển bằng nút bấm"),
     telebot.types.BotCommand("/auto", "🔴 BẬT Radar: Quét và báo động tự động 24/7"),
     telebot.types.BotCommand("/stop", "🟢 TẮT Radar: Cho phép camera đi ngủ"),
-    telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất")
+    telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất"),
+    telebot.types.BotCommand("/settings", "Chỉnh độ nhạy, video, Gemini và camera"),
+    telebot.types.BotCommand("/set_camera_index", "Chọn camera 0, 1 hoặc 2"),
+    telebot.types.BotCommand("/set_camera_width", "Chỉnh chiều rộng camera"),
+    telebot.types.BotCommand("/set_camera_height", "Chỉnh chiều cao camera"),
+    telebot.types.BotCommand("/set_camera_fps", "Chỉnh FPS camera"),
+    telebot.types.BotCommand("/set_camera_rotation", "Xoay ảnh camera 0/90/180/270 độ")
 ])
 
 def tail_error_log(max_lines=20):
@@ -315,7 +321,10 @@ def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
 
     success = False
     try:
-        success, img = read_camera_frame(warmup_seconds=1)
+        success, img = read_camera_frame(
+            warmup_seconds=1,
+            camera_config=get_settings_snapshot()
+        )
     finally:
         if was_auto:
             motion_monitor.set_radar_state(True)

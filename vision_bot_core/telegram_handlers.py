@@ -4,9 +4,12 @@ import time
 from dataclasses import dataclass
 
 from .settings_store import (
+    CAMERA_INDEX_CHOICES,
+    CAMERA_ROTATION_CHOICES,
     HISTORY_LIMIT_CHOICES,
     SETTING_LABELS,
     SETTING_LIMITS,
+    SETTING_CHOICES,
     SETTING_UNITS,
 )
 from .telegram_ui import (
@@ -92,6 +95,21 @@ def register_telegram_handlers(ctx):
         ctx.update_setting(setting_name, value)
         bot.reply_to(message, f"✅ Đã cập nhật {label}: {value}{unit}")
 
+    def set_choice_setting(message, setting_name, command_name, label):
+        clear_pending_setting_input(message)
+        value = parse_int_argument(message, command_name)
+        if value is None:
+            return
+
+        choices = SETTING_CHOICES.get(setting_name)
+        if choices is None or value not in choices:
+            bot.reply_to(message, f"{label} phải là một trong các giá trị: {', '.join(str(choice) for choice in choices or [])}.")
+            return
+
+        ctx.update_setting(setting_name, value)
+        unit = SETTING_UNITS.get(setting_name, "")
+        bot.reply_to(message, f"✅ Đã cập nhật {label}: {value}{unit}")
+
     def set_boolean_setting(message, setting_name, value, label):
         clear_pending_setting_input(message)
         ctx.update_setting(setting_name, value)
@@ -146,6 +164,12 @@ def register_telegram_handlers(ctx):
         if not min_value <= value <= max_value:
             set_pending_setting_input_from_message(message, setting_name)
             bot.reply_to(message, f"{label} phải nằm trong khoảng {min_value}-{max_value}{unit}. Nhập lại hoặc gõ hủy.")
+            return True
+
+        choices = SETTING_CHOICES.get(setting_name)
+        if choices is not None and value not in choices:
+            set_pending_setting_input_from_message(message, setting_name)
+            bot.reply_to(message, f"{label} phải là một trong các giá trị: {', '.join(str(choice) for choice in choices)}. Nhập lại hoặc gõ hủy.")
             return True
 
         ctx.update_setting(setting_name, value)
@@ -262,6 +286,59 @@ def register_telegram_handlers(ctx):
             "alert_video_fps",
             "/set_video_fps",
             "FPS video"
+        )
+
+    @bot.message_handler(commands=['set_camera_index'])
+    def set_camera_index(message):
+        if not verify_user(message): return
+        set_choice_setting(
+            message,
+            "camera_index",
+            "/set_camera_index",
+            "camera index"
+        )
+
+    @bot.message_handler(commands=['set_camera_width'])
+    def set_camera_width(message):
+        if not verify_user(message): return
+        set_numeric_setting(
+            message,
+            "camera_width",
+            "/set_camera_width",
+            "chiều rộng camera",
+            " px"
+        )
+
+    @bot.message_handler(commands=['set_camera_height'])
+    def set_camera_height(message):
+        if not verify_user(message): return
+        set_numeric_setting(
+            message,
+            "camera_height",
+            "/set_camera_height",
+            "chiều cao camera",
+            " px"
+        )
+
+    @bot.message_handler(commands=['set_camera_fps'])
+    def set_camera_fps(message):
+        if not verify_user(message): return
+        set_numeric_setting(
+            message,
+            "camera_fps",
+            "/set_camera_fps",
+            "FPS camera",
+            " fps"
+        )
+
+    @bot.message_handler(commands=['set_camera_rotation'])
+    def set_camera_rotation(message):
+        if not verify_user(message): return
+        set_choice_setting(
+            message,
+            "camera_rotation",
+            "/set_camera_rotation",
+            "góc xoay camera"
         )
 
     @bot.message_handler(commands=['video_on'])
@@ -486,6 +563,29 @@ def register_telegram_handlers(ctx):
         if call.data == "setting:toggle_ai":
             ctx.update_setting("use_gemini_analysis", not ctx.get_setting("use_gemini_analysis"))
             bot.answer_callback_query(call.id, "Đã cập nhật Gemini")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data.startswith("setting:select:"):
+            parts = call.data.split(":")
+            if len(parts) != 4:
+                bot.answer_callback_query(call.id, "Nút chọn không hợp lệ", show_alert=True)
+                return
+
+            setting_name = parts[2]
+            try:
+                value = int(parts[3])
+            except ValueError:
+                bot.answer_callback_query(call.id, "Giá trị nút không hợp lệ", show_alert=True)
+                return
+
+            choices = SETTING_CHOICES.get(setting_name)
+            if choices is None or value not in choices:
+                bot.answer_callback_query(call.id, "Giá trị nút không hợp lệ", show_alert=True)
+                return
+
+            ctx.update_setting(setting_name, value)
+            bot.answer_callback_query(call.id, f"Đã cập nhật {SETTING_LABELS.get(setting_name, setting_name)}")
             edit_menu_message(call, format_settings_message(), build_settings_menu())
             return
 

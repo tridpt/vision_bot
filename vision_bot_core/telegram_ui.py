@@ -2,8 +2,11 @@ import telebot
 
 from .alert_history_store import text_preview
 from .settings_store import (
+    CAMERA_INDEX_CHOICES,
+    CAMERA_ROTATION_CHOICES,
     HISTORY_LIMIT_CHOICES,
     SETTING_EXAMPLES,
+    SETTING_CHOICES,
     SETTING_LABELS,
     SETTING_LIMITS,
     SETTING_UNITS,
@@ -61,6 +64,10 @@ def format_alert_history_message(entries, format_timestamp):
 
 def format_settings_message():
     current = get_settings_snapshot()
+    camera_resolution = "mặc định"
+    if current["camera_width"] > 0 and current["camera_height"] > 0:
+        camera_resolution = f"{current['camera_width']}x{current['camera_height']}"
+    camera_fps = "mặc định" if current["camera_fps"] <= 0 else f"{current['camera_fps']} fps"
     return (
         "⚙️ CÀI ĐẶT VISION BOT\n\n"
         f"🎯 Độ nhạy chuyển động: {current['motion_area_threshold']} "
@@ -70,6 +77,7 @@ def format_settings_message():
         f"🎞️ FPS video: {current['alert_video_fps']}\n"
         f"📹 Gửi video: {on_off_label(current['send_video'])}\n"
         f"🧠 Phân tích Gemini: {on_off_label(current['use_gemini_analysis'])}\n\n"
+        f"📷 Camera: index {current['camera_index']} | {camera_resolution} | {camera_fps} | xoay {current['camera_rotation']} độ\n"
         f"🧾 Giữ lịch sử: {current['alert_history_limit']} cảnh báo\n\n"
         "Bấm nút bên dưới để chỉnh. Với các mục số, bot sẽ hỏi và bạn chỉ cần nhập số mới vào khung chat."
     )
@@ -81,10 +89,14 @@ def build_setting_prompt(setting_name):
     min_value, max_value = SETTING_LIMITS[setting_name]
     current_value = get_setting(setting_name)
     example = SETTING_EXAMPLES[setting_name]
+    if setting_name in SETTING_CHOICES:
+        valid_text = "Giá trị hợp lệ: " + ", ".join(str(choice) for choice in SETTING_CHOICES[setting_name])
+    else:
+        valid_text = f"Khoảng hợp lệ: {min_value}-{max_value}{unit}"
     return (
         f"Nhập {label} mới.\n"
         f"Hiện tại: {current_value}{unit}\n"
-        f"Khoảng hợp lệ: {min_value}-{max_value}{unit}\n"
+        f"{valid_text}\n"
         f"Ví dụ: {example}\n\n"
         "Gõ hủy để bỏ qua."
     )
@@ -157,6 +169,20 @@ def build_settings_menu():
     current = get_settings_snapshot()
     video_label = "📹 Tắt video" if current["send_video"] else "📹 Bật video"
     ai_label = "🧠 Tắt Gemini" if current["use_gemini_analysis"] else "🧠 Bật Gemini"
+    camera_index_buttons = [
+        telebot.types.InlineKeyboardButton(
+            f"{'✅ ' if current['camera_index'] == choice else ''}Cam {choice}",
+            callback_data=f"setting:select:camera_index:{choice}"
+        )
+        for choice in CAMERA_INDEX_CHOICES
+    ]
+    camera_rotation_buttons = [
+        telebot.types.InlineKeyboardButton(
+            f"{'✅ ' if current['camera_rotation'] == choice else ''}{choice}°",
+            callback_data=f"setting:select:camera_rotation:{choice}"
+        )
+        for choice in CAMERA_ROTATION_CHOICES
+    ]
     history_buttons = [
         telebot.types.InlineKeyboardButton(
             f"{'✅ ' if current['alert_history_limit'] == choice else ''}{choice} cảnh báo",
@@ -178,6 +204,16 @@ def build_settings_menu():
         telebot.types.InlineKeyboardButton(video_label, callback_data="setting:toggle_video"),
         telebot.types.InlineKeyboardButton(ai_label, callback_data="setting:toggle_ai")
     )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("📷 Nhập rộng", callback_data="setting:input:camera_width"),
+        telebot.types.InlineKeyboardButton("📷 Nhập cao", callback_data="setting:input:camera_height")
+    )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("📷 Nhập FPS camera", callback_data="setting:input:camera_fps"),
+        telebot.types.InlineKeyboardButton("📷 Nhập camera index", callback_data="setting:input:camera_index")
+    )
+    keyboard.add(*camera_index_buttons)
+    keyboard.add(*camera_rotation_buttons)
     keyboard.add(*history_buttons)
     keyboard.add(telebot.types.InlineKeyboardButton("⬅️ Quay lại menu", callback_data="menu:main"))
     return keyboard
@@ -190,5 +226,8 @@ def format_settings_snapshot(settings_snapshot):
         f"Video {settings_snapshot['alert_video_seconds']}s/{settings_snapshot['alert_video_fps']}fps | "
         f"Gửi video {on_off_label(settings_snapshot['send_video'])} | "
         f"Gemini {on_off_label(settings_snapshot['use_gemini_analysis'])} | "
+        f"Camera {settings_snapshot['camera_index']} "
+        f"{settings_snapshot['camera_width']}x{settings_snapshot['camera_height']} "
+        f"{settings_snapshot['camera_fps']}fps xoay {settings_snapshot['camera_rotation']}° | "
         f"Giữ lịch sử {settings_snapshot['alert_history_limit']}"
     )

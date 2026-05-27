@@ -29,6 +29,27 @@ class CameraToolsTests(unittest.TestCase):
             self.assertTrue(image_path.exists())
             self.assertGreater(image_path.stat().st_size, 0)
 
+    def test_transform_camera_frame_rotates_when_configured(self):
+        frame = np.array(
+            [
+                [[1, 0, 0], [2, 0, 0]],
+                [[3, 0, 0], [4, 0, 0]],
+            ],
+            dtype=np.uint8,
+        )
+
+        rotated = camera_tools.transform_camera_frame(frame, {"camera_rotation": 180})
+
+        self.assertEqual(rotated.shape, frame.shape)
+        self.assertEqual(rotated[0, 0, 0], 4)
+        self.assertEqual(rotated[1, 1, 0], 1)
+
+    def test_format_camera_config_uses_defaults(self):
+        text = camera_tools.format_camera_config({"camera_index": 2, "camera_rotation": 90})
+
+        self.assertIn("camera 2", text)
+        self.assertIn("xoay 90", text)
+
 
 if __name__ == "__main__":
     unittest.main()

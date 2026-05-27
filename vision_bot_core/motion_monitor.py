@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from .camera_tools import (
     build_motion_gray,
     check_camera_once,
+    format_camera_config,
+    normalize_camera_config,
     has_large_motion,
     open_camera,
     record_alert_video,
     save_frame,
+    transform_camera_frame,
     warm_up_camera,
 )
 
@@ -60,7 +63,7 @@ class MotionMonitor:
     def get_camera_status_for_report(self):
         if self.is_radar_active():
             return self.get_camera_status()
-        return check_camera_once()
+        return check_camera_once(camera_config=self.ctx.get_settings_snapshot())
 
     def get_camera_status_for_dashboard(self):
         with self._lock:
@@ -93,6 +96,7 @@ class MotionMonitor:
 
     def _motion_detection_loop(self):
         camera_stream = None
+        active_camera_config = None
         last_gray_frame = None
         last_alert_time = 0
         last_camera_error_log_time = 0
@@ -104,36 +108,48 @@ class MotionMonitor:
                     if camera_stream is not None:
                         camera_stream.release()
                         camera_stream = None
+                        active_camera_config = None
                         last_gray_frame = None
                         self._set_camera_status(False, "Camera đang nghỉ vì radar tắt")
                     time.sleep(1)
                     continue
 
+                camera_config = normalize_camera_config(self.ctx.get_settings_snapshot())
+                if camera_stream is not None and camera_config != active_camera_config:
+                    camera_stream.release()
+                    camera_stream = None
+                    active_camera_config = None
+                    last_gray_frame = None
+                    self._set_camera_status(False, "Đang áp dụng cấu hình camera mới")
+
                 if camera_stream is None:
-                    camera_stream = open_camera()
+                    camera_stream = open_camera(camera_config=camera_config)
+                    active_camera_config = camera_config
                     time.sleep(1.5)
                     if not camera_stream.isOpened():
-                        status = "Radar bật nhưng không mở được camera"
+                        status = f"Radar bật nhưng không mở được {format_camera_config(camera_config)}"
                         self._set_camera_status(False, status)
                         if time.time() - last_camera_error_log_time > 60:
                             self.ctx.log_error(status)
                             last_camera_error_log_time = time.time()
                         camera_stream.release()
                         camera_stream = None
+                        active_camera_config = None
                         time.sleep(2)
                         continue
                     warm_up_camera(camera_stream, delay_seconds=0, buffer_reads=5)
 
                 success, img = camera_stream.read()
                 if not success:
-                    status = "Radar bật nhưng không đọc được ảnh từ camera"
+                    status = f"Radar bật nhưng không đọc được ảnh từ {format_camera_config(active_camera_config)}"
                     self._set_camera_status(False, status)
                     if time.time() - last_camera_error_log_time > 60:
                         self.ctx.log_error(status)
                         last_camera_error_log_time = time.time()
                     time.sleep(0.5)
                     continue
-                self._set_camera_status(True, "Camera đang mở bởi radar")
+                img = transform_camera_frame(img, active_camera_config)
+                self._set_camera_status(True, f"Camera đang mở bởi radar ({format_camera_config(active_camera_config)})")
 
                 if time.time() - last_alert_time < self.ctx.get_setting("alert_cooldown_seconds"):
                     last_gray_frame = build_motion_gray(img)
@@ -170,7 +186,8 @@ class MotionMonitor:
                             img,
                             video_path,
                             video_seconds,
-                            video_fps
+                            video_fps,
+                            camera_config=active_camera_config
                         )
                         if video_ready:
                             try:

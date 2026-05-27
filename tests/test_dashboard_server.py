@@ -233,6 +233,15 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('/download-history-zip', html)
         self.assertIn("Tải lịch sử .zip", html)
 
+    def test_render_settings_tab_includes_camera_controls(self):
+        html = render_dashboard_html(make_dashboard_context(), active_tab="settings")
+
+        self.assertIn("camera_index", html)
+        self.assertIn("camera_width", html)
+        self.assertIn("camera_height", html)
+        self.assertIn("camera_fps", html)
+        self.assertIn("camera_rotation", html)
+
     def test_render_history_tab_paginates_alerts(self):
         entries = [
             {"id": f"alert-{index}", "timestamp": index, "analysis": f"record {index:03d}"}

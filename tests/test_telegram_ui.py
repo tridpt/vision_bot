@@ -44,6 +44,7 @@ class TelegramUiTests(unittest.TestCase):
 
     def test_formatters_include_expected_sections(self):
         self.assertIn("VISION BOT", telegram_ui.format_settings_message())
+        self.assertIn("Camera:", telegram_ui.format_settings_message())
         self.assertIn("LOG", telegram_ui.format_error_log_message("line"))
         self.assertIn("Video:", telegram_ui.format_alert_history_message(
             [{"timestamp": 1, "video_status": "ok", "analysis": "motion"}],
@@ -55,6 +56,7 @@ class TelegramUiTests(unittest.TestCase):
             lambda size: f"{size} B",
         ))
         self.assertIn("8000", telegram_ui.build_setting_prompt("motion_area_threshold"))
+        self.assertIn("0, 90, 180, 270", telegram_ui.build_setting_prompt("camera_rotation"))
 
     def test_format_settings_snapshot_uses_current_values(self):
         text = telegram_ui.format_settings_snapshot({
@@ -65,11 +67,18 @@ class TelegramUiTests(unittest.TestCase):
             "send_video": True,
             "use_gemini_analysis": False,
             "alert_history_limit": 50,
+            "camera_index": 1,
+            "camera_width": 1280,
+            "camera_height": 720,
+            "camera_fps": 30,
+            "camera_rotation": 180,
         })
 
         self.assertIn("8000", text)
         self.assertIn("10s", text)
         self.assertIn("50", text)
+        self.assertIn("1280x720", text)
+        self.assertIn("180", text)
 
 
 if __name__ == "__main__":

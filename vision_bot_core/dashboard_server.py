@@ -73,6 +73,8 @@ DASHBOARD_BACKUP_FILTERS = (
     ("newest", "Mới nhất")
 )
 DASHBOARD_BACKUP_FILTER_KEYS = {key for key, _ in DASHBOARD_BACKUP_FILTERS}
+DASHBOARD_CAMERA_INDEX_CHOICES = (0, 1, 2)
+DASHBOARD_CAMERA_ROTATION_CHOICES = (0, 90, 180, 270)
 
 HISTORY_EXPORT_FILENAMES = {"alert_history.json", "bot_errors.log"}
 HISTORY_EXPORT_MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov", ".webm"}
@@ -367,21 +369,55 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
         "motion_area_threshold",
         "alert_cooldown_seconds",
         "alert_video_seconds",
-        "alert_video_fps"
+        "alert_video_fps",
+        "camera_width",
+        "camera_height",
+        "camera_fps"
     )
     rows = []
     for field in numeric_fields:
         min_value, max_value = ctx.settings_limits[field]
+        hint = f"{min_value}-{max_value}{escape_html(ctx.setting_units[field])}"
+        if field in ("camera_width", "camera_height", "camera_fps"):
+            hint = f"{hint}. Nhập 0 để dùng mặc định của camera."
         rows.append(
             "<tr>"
             f'<th><label for="setting_{field}">{escape_html(ctx.setting_labels[field])}</label></th>'
             "<td>"
             f'<input id="setting_{field}" name="{field}" type="number" '
             f'value="{settings_snapshot[field]}" min="{min_value}" max="{max_value}" step="1">'
-            f'<span class="setting-hint">{min_value}-{max_value}{escape_html(ctx.setting_units[field])}</span>'
+            f'<span class="setting-hint">{hint}</span>'
             "</td>"
             "</tr>"
         )
+
+    camera_index_options = "".join(
+        f'<option value="{choice}"{selected_attr(settings_snapshot["camera_index"], choice)}>Camera {choice}</option>'
+        for choice in DASHBOARD_CAMERA_INDEX_CHOICES
+    )
+    rows.append(
+        "<tr>"
+        f'<th><label for="setting_camera_index">{escape_html(ctx.setting_labels["camera_index"])}</label></th>'
+        "<td>"
+        f'<select id="setting_camera_index" name="camera_index">{camera_index_options}</select>'
+        '<span class="setting-hint">Chọn 0, 1 hoặc 2 tùy webcam đang dùng.</span>'
+        "</td>"
+        "</tr>"
+    )
+
+    camera_rotation_options = "".join(
+        f'<option value="{choice}"{selected_attr(settings_snapshot["camera_rotation"], choice)}>{choice} độ</option>'
+        for choice in DASHBOARD_CAMERA_ROTATION_CHOICES
+    )
+    rows.append(
+        "<tr>"
+        f'<th><label for="setting_camera_rotation">{escape_html(ctx.setting_labels["camera_rotation"])}</label></th>'
+        "<td>"
+        f'<select id="setting_camera_rotation" name="camera_rotation">{camera_rotation_options}</select>'
+        '<span class="setting-hint">Dùng 180 độ nếu ảnh camera bị ngược.</span>'
+        "</td>"
+        "</tr>"
+    )
 
     history_options = "".join(
         f'<option value="{choice}"{selected_attr(settings_snapshot["alert_history_limit"], choice)}>{choice} cảnh báo</option>'
@@ -491,6 +527,11 @@ def render_settings_backup_detail(ctx, data):
         "send_video",
         "use_gemini_analysis",
         "alert_history_limit",
+        "camera_index",
+        "camera_width",
+        "camera_height",
+        "camera_fps",
+        "camera_rotation",
     ]
     extra_keys = sorted(key for key in data if key not in ordered_keys)
     rows = []
@@ -763,6 +804,8 @@ def update_dashboard_settings(ctx, form):
         value = ctx.clamp_int(raw_value, current[field], min_value, max_value)
         if field == "alert_history_limit" and value not in ctx.history_limit_choices:
             value = min(ctx.history_limit_choices, key=lambda choice: abs(choice - value))
+        if field == "camera_rotation" and value not in DASHBOARD_CAMERA_ROTATION_CHOICES:
+            value = min(DASHBOARD_CAMERA_ROTATION_CHOICES, key=lambda choice: abs(choice - value))
         updates[field] = value
 
     updates["send_video"] = bool_from_dashboard(

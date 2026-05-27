@@ -4,35 +4,85 @@ import time
 import cv2
 
 
-def open_camera(camera_index=0):
-    return cv2.VideoCapture(camera_index)
+def normalize_camera_config(camera_config=None, camera_index=0):
+    config = camera_config or {}
+    return {
+        "camera_index": int(config.get("camera_index", camera_index) or 0),
+        "camera_width": int(config.get("camera_width", 0) or 0),
+        "camera_height": int(config.get("camera_height", 0) or 0),
+        "camera_fps": int(config.get("camera_fps", 0) or 0),
+        "camera_rotation": int(config.get("camera_rotation", 0) or 0),
+    }
 
 
-def read_camera_frame(camera_index=0, warmup_seconds=0):
+def apply_camera_config(camera, config):
+    if config["camera_width"] > 0:
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, config["camera_width"])
+    if config["camera_height"] > 0:
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, config["camera_height"])
+    if config["camera_fps"] > 0:
+        camera.set(cv2.CAP_PROP_FPS, config["camera_fps"])
+
+
+def open_camera(camera_index=0, camera_config=None):
+    config = normalize_camera_config(camera_config, camera_index=camera_index)
+    camera = cv2.VideoCapture(config["camera_index"])
+    apply_camera_config(camera, config)
+    return camera
+
+
+def transform_camera_frame(frame, camera_config=None):
+    rotation = normalize_camera_config(camera_config)["camera_rotation"]
+    if rotation == 90:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    if rotation == 180:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    if rotation == 270:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return frame
+
+
+def format_camera_config(camera_config=None):
+    config = normalize_camera_config(camera_config)
+    resolution = "mặc định"
+    if config["camera_width"] > 0 and config["camera_height"] > 0:
+        resolution = f'{config["camera_width"]}x{config["camera_height"]}'
+    fps = "mặc định" if config["camera_fps"] <= 0 else f'{config["camera_fps"]}fps'
+    return (
+        f'camera {config["camera_index"]}, '
+        f'{resolution}, {fps}, xoay {config["camera_rotation"]}°'
+    )
+
+
+def read_camera_frame(camera_index=0, warmup_seconds=0, camera_config=None):
     camera = None
+    config = normalize_camera_config(camera_config, camera_index=camera_index)
     try:
-        camera = open_camera(camera_index)
+        camera = open_camera(camera_config=config)
         if warmup_seconds > 0:
             time.sleep(warmup_seconds)
         success, frame = camera.read()
         if not success:
             return False, None
-        return True, frame
+        return True, transform_camera_frame(frame, config)
     finally:
         if camera is not None:
             camera.release()
 
 
-def check_camera_once(camera_index=0):
-    camera = open_camera(camera_index)
+def check_camera_once(camera_index=0, camera_config=None):
+    config = normalize_camera_config(camera_config, camera_index=camera_index)
+    camera = open_camera(camera_config=config)
     try:
         time.sleep(0.5)
         if not camera.isOpened():
-            return False, "Không mở được camera"
-        success, _ = camera.read()
+            return False, f"Không mở được {format_camera_config(config)}"
+        success, frame = camera.read()
         if success:
-            return True, "Mở và đọc được ảnh thử"
-        return False, "Mở được camera nhưng không đọc được ảnh"
+            transformed = transform_camera_frame(frame, config)
+            height, width = transformed.shape[:2]
+            return True, f"Mở và đọc được ảnh thử ({format_camera_config(config)}, thực tế {width}x{height})"
+        return False, f"Mở được {format_camera_config(config)} nhưng không đọc được ảnh"
     finally:
         camera.release()
 
@@ -78,7 +128,8 @@ def create_alert_video_writer(video_path, fps, frame_size):
     return None, ""
 
 
-def record_alert_video(camera_stream, first_frame, video_path, duration_seconds, fps):
+def record_alert_video(camera_stream, first_frame, video_path, duration_seconds, fps, camera_config=None):
+    config = normalize_camera_config(camera_config)
     height, width = first_frame.shape[:2]
     width -= width % 2
     height -= height % 2
@@ -102,6 +153,7 @@ def record_alert_video(camera_stream, first_frame, video_path, duration_seconds,
             if not success:
                 read_failed = True
                 break
+            frame = transform_camera_frame(frame, config)
 
             next_frame_time += 1 / fps
             delay = next_frame_time - time.time()

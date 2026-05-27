@@ -50,6 +50,11 @@ class SettingsStoreTests(unittest.TestCase):
             "alert_video_seconds": "8",
             "alert_video_fps": "bad",
             "alert_history_limit": 73,
+            "camera_index": 7,
+            "camera_width": 5000,
+            "camera_height": -1,
+            "camera_fps": "45",
+            "camera_rotation": 181,
             "send_video": "off",
             "use_gemini_analysis": "yes",
         })
@@ -59,6 +64,11 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertEqual(normalized["alert_video_seconds"], 8)
         self.assertEqual(normalized["alert_video_fps"], 10)
         self.assertEqual(normalized["alert_history_limit"], 50)
+        self.assertEqual(normalized["camera_index"], 2)
+        self.assertEqual(normalized["camera_width"], 3840)
+        self.assertEqual(normalized["camera_height"], 0)
+        self.assertEqual(normalized["camera_fps"], 45)
+        self.assertEqual(normalized["camera_rotation"], 180)
         self.assertFalse(normalized["send_video"])
         self.assertTrue(normalized["use_gemini_analysis"])
 

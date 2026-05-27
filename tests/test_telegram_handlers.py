@@ -56,6 +56,11 @@ class TelegramHandlersTests(unittest.TestCase):
         self.assertIn(("menu",), command_sets)
         self.assertIn(("status",), command_sets)
         self.assertIn(("settings",), command_sets)
+        self.assertIn(("set_camera_index",), command_sets)
+        self.assertIn(("set_camera_width",), command_sets)
+        self.assertIn(("set_camera_height",), command_sets)
+        self.assertIn(("set_camera_fps",), command_sets)
+        self.assertIn(("set_camera_rotation",), command_sets)
         self.assertEqual(len(bot.callback_handlers), 1)
 
 
