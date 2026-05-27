@@ -156,7 +156,7 @@ Có thể chỉnh setting ở cả Telegram và dashboard. Cả hai đều lưu 
 Dashboard có các tab:
 
 - `Trạng thái`: radar, camera, uptime, logs size, setting hiện tại.
-- `Lịch sử`: xem ảnh/video cảnh báo, lọc hôm nay/có video/không video/mới nhất, xóa từng cảnh báo.
+- `Lịch sử`: xem ảnh/video cảnh báo, lọc hôm nay/có video/không video/mới nhất, xóa từng cảnh báo, tải toàn bộ lịch sử thành file `.zip`.
 - `Setting`: chỉnh setting trực tiếp trên web.
 - `Backup`: lọc backup theo loại, xem/tải nội dung từng backup, khôi phục hoặc xóa một backup cụ thể.
 - `Log lỗi`: xem lỗi nội bộ gần nhất.
@@ -174,6 +174,8 @@ Thư mục `logs/` chứa:
 - `backups/`: backup nhỏ của `settings.json` và `alert_history.json`.
 
 Khi lịch sử vượt giới hạn setting, bot sẽ xóa record cũ và xóa luôn ảnh/video tương ứng. Nếu muốn dọn toàn bộ, dùng nút `Dọn lịch sử` trong Telegram hoặc dashboard.
+
+Có thể tải nhanh `alert_history.json`, ảnh/video cảnh báo và `bot_errors.log` còn trong `logs/` bằng nút `Tải lịch sử .zip` ở tab `Lịch sử` của dashboard.
 
 Trước khi đổi setting, cắt lịch sử, dọn toàn bộ lịch sử hoặc khôi phục setting, bot tự lưu backup JSON vào `logs/backups/`. Backup này chỉ lưu file cấu hình/lịch sử để nhẹ ổ cứng, không copy lại ảnh/video cảnh báo.
 

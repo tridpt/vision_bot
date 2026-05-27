@@ -2,8 +2,10 @@ import html
 import json
 import mimetypes
 import os
+import tempfile
 import threading
 import time
+import zipfile
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -71,6 +73,9 @@ DASHBOARD_BACKUP_FILTERS = (
     ("newest", "Mới nhất")
 )
 DASHBOARD_BACKUP_FILTER_KEYS = {key for key, _ in DASHBOARD_BACKUP_FILTERS}
+
+HISTORY_EXPORT_FILENAMES = {"alert_history.json", "bot_errors.log"}
+HISTORY_EXPORT_MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov", ".webm"}
 
 
 def escape_html(value):
@@ -174,6 +179,10 @@ def dashboard_backup_download_url(filename):
     return "/download-backup?" + urlencode({"filename": filename})
 
 
+def dashboard_history_zip_url():
+    return "/download-history-zip"
+
+
 def render_dashboard_filter_controls(active_filter, shown_count, total_count):
     links = []
     for filter_key, label in DASHBOARD_HISTORY_FILTERS:
@@ -189,6 +198,14 @@ def render_dashboard_filter_controls(active_filter, shown_count, total_count):
         f"{''.join(links)}"
         "</div>"
         f'<span class="filter-count">Đang hiển thị {shown_count}/{total_count}</span>'
+        "</div>"
+    )
+
+
+def render_dashboard_history_actions():
+    return (
+        '<div class="history-actions">'
+        f'<a class="download-button" href="{dashboard_history_zip_url()}">Tải lịch sử .zip</a>'
         "</div>"
     )
 
@@ -765,6 +782,7 @@ def render_dashboard_html(
     history_content = f"""
     <section class="tab-panel">
       <h2>Lịch sử cảnh báo</h2>
+      {render_dashboard_history_actions()}
       {filter_controls}
       <section class="history">{render_dashboard_history(ctx, history_entries, history_filter)}</section>
     </section>"""
@@ -861,6 +879,8 @@ def render_dashboard_html(
     .history {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }}
     .history-meta {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; color: var(--muted); margin-bottom: 8px; }}
     .history-meta span {{ display: block; }}
+    .history-actions {{ display: flex; justify-content: flex-end; margin-bottom: 12px; }}
+    .download-button {{ display: inline-block; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 700; padding: 9px 13px; text-decoration: none; }}
     .filter-bar {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 12px; flex-wrap: wrap; }}
     .filter-links {{ display: flex; flex-wrap: wrap; gap: 8px; }}
     .filter-link {{ border: 1px solid var(--line); border-radius: 999px; color: var(--text); padding: 6px 10px; text-decoration: none; }}
@@ -910,6 +930,62 @@ def render_dashboard_html(
 </html>"""
 
 
+def is_dashboard_history_export_file(filename):
+    lower_name = filename.lower()
+    if lower_name in HISTORY_EXPORT_FILENAMES:
+        return True
+    extension = os.path.splitext(lower_name)[1]
+    return lower_name.startswith("alert_") and extension in HISTORY_EXPORT_MEDIA_EXTENSIONS
+
+
+def get_dashboard_history_export_files(ctx):
+    log_dir = os.path.abspath(ctx.log_dir)
+    if not os.path.isdir(log_dir):
+        return []
+
+    files = []
+    try:
+        filenames = os.listdir(log_dir)
+    except OSError as e:
+        ctx.log_error(f"Dashboard khong doc duoc thu muc logs: {log_dir}", e)
+        return []
+
+    for filename in filenames:
+        absolute_path = os.path.abspath(os.path.join(log_dir, filename))
+        try:
+            if os.path.commonpath([log_dir, absolute_path]) != log_dir:
+                continue
+        except ValueError:
+            continue
+        if not os.path.isfile(absolute_path):
+            continue
+        if not is_dashboard_history_export_file(filename):
+            continue
+        files.append((absolute_path, f"logs/{filename}"))
+
+    return sorted(files, key=lambda item: item[1].lower())
+
+
+def build_dashboard_history_zip(ctx):
+    export_files = get_dashboard_history_export_files(ctx)
+    temp_file = tempfile.NamedTemporaryFile(prefix="vision_bot_history_", suffix=".zip", delete=False)
+    temp_path = temp_file.name
+    temp_file.close()
+
+    written_count = 0
+    with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for absolute_path, archive_name in export_files:
+            try:
+                zip_file.write(absolute_path, archive_name)
+                written_count += 1
+            except OSError as e:
+                ctx.log_error(f"Dashboard khong them duoc file vao zip: {absolute_path}", e)
+        if written_count == 0:
+            zip_file.writestr("README.txt", "Khong co file lich su canh bao trong logs/.\n")
+
+    return temp_path, written_count
+
+
 def parse_range_header(range_header, file_size):
     if not range_header or not range_header.startswith("bytes="):
         return None, False
@@ -938,7 +1014,7 @@ def parse_range_header(range_header, file_size):
     return (start, end), True
 
 
-def send_dashboard_file(handler, absolute_path, content_type):
+def send_dashboard_file(handler, absolute_path, content_type, download_filename=""):
     file_size = os.path.getsize(absolute_path)
     byte_range, range_requested = parse_range_header(handler.headers.get("Range"), file_size)
 
@@ -963,6 +1039,8 @@ def send_dashboard_file(handler, absolute_path, content_type):
     handler.send_header("Content-Type", content_type)
     handler.send_header("Accept-Ranges", "bytes")
     handler.send_header("Content-Length", str(content_length))
+    if download_filename:
+        handler.send_header("Content-Disposition", f'attachment; filename="{download_filename}"')
     if status_code == 206:
         handler.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
     handler.send_header("Cache-Control", "no-store")
@@ -1025,6 +1103,26 @@ def serve_dashboard_backup_download(ctx, handler, query):
     handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
     handler.wfile.write(content)
+
+
+def serve_dashboard_history_zip(ctx, handler):
+    zip_path = ""
+    try:
+        zip_path, _ = build_dashboard_history_zip(ctx)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        download_filename = f"vision_bot_history_{timestamp}.zip"
+        send_dashboard_file(handler, zip_path, "application/zip", download_filename)
+    except (ConnectionError, TimeoutError):
+        return
+    except OSError as e:
+        ctx.log_error("Dashboard khong tao duoc file zip lich su", e)
+        handler.send_error(500)
+    finally:
+        if zip_path:
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
 
 
 def redirect_dashboard(handler, location):
@@ -1109,6 +1207,10 @@ def make_dashboard_handler(ctx):
 
             if parsed_url.path == "/download-backup":
                 serve_dashboard_backup_download(ctx, self, parse_qs(parsed_url.query))
+                return
+
+            if parsed_url.path == "/download-history-zip":
+                serve_dashboard_history_zip(ctx, self)
                 return
 
             self.send_error(404)

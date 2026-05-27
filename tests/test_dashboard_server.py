@@ -1,12 +1,16 @@
 import json
+import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from vision_bot_core.dashboard_server import (
     DashboardContext,
+    build_dashboard_history_zip,
     delete_selected_dashboard_backup,
     get_dashboard_backup_file,
+    get_dashboard_history_export_files,
     normalize_dashboard_tab,
     render_dashboard_html,
     restore_selected_dashboard_backup,
@@ -14,7 +18,7 @@ from vision_bot_core.dashboard_server import (
 from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
 
 
-def make_dashboard_context(settings_backup_path="", history_backup_path="", restored=None, deleted=None):
+def make_dashboard_context(settings_backup_path="", history_backup_path="", restored=None, deleted=None, log_dir="logs"):
     if restored is None:
         restored = []
     if deleted is None:
@@ -24,7 +28,7 @@ def make_dashboard_context(settings_backup_path="", history_backup_path="", rest
         host="127.0.0.1",
         port=8765,
         url="http://127.0.0.1:8765",
-        log_dir="logs",
+        log_dir=log_dir,
         settings_limits=SETTING_LIMITS,
         setting_labels=SETTING_LABELS,
         setting_units=SETTING_UNITS,
@@ -213,6 +217,44 @@ class DashboardServerTests(unittest.TestCase):
             self.assertIsNotNone(backup)
             self.assertEqual(backup["path"], str(backup_path))
             self.assertIsNone(get_dashboard_backup_file(ctx, "missing.json"))
+
+    def test_render_history_tab_shows_zip_download_link(self):
+        html = render_dashboard_html(make_dashboard_context(), active_tab="history")
+
+        self.assertIn('/download-history-zip', html)
+        self.assertIn("Tải lịch sử .zip", html)
+
+    def test_build_dashboard_history_zip_contains_history_files_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_dir = Path(temp_dir) / "logs"
+            log_dir.mkdir()
+            (log_dir / "alert_history.json").write_text("[]", encoding="utf-8")
+            (log_dir / "alert_20260527_101010.jpg").write_bytes(b"jpg")
+            (log_dir / "alert_20260527_101010.mp4").write_bytes(b"mp4")
+            (log_dir / "bot_errors.log").write_text("error", encoding="utf-8")
+            (log_dir / "notes.txt").write_text("skip", encoding="utf-8")
+            backup_dir = log_dir / "backups"
+            backup_dir.mkdir()
+            (backup_dir / "settings_before_setting.json").write_text("{}", encoding="utf-8")
+            ctx = make_dashboard_context(log_dir=str(log_dir))
+
+            export_names = [archive_name for _, archive_name in get_dashboard_history_export_files(ctx)]
+            zip_path, written_count = build_dashboard_history_zip(ctx)
+            try:
+                with zipfile.ZipFile(zip_path) as zip_file:
+                    zip_names = sorted(zip_file.namelist())
+            finally:
+                os.remove(zip_path)
+
+        expected_names = [
+            "logs/alert_20260527_101010.jpg",
+            "logs/alert_20260527_101010.mp4",
+            "logs/alert_history.json",
+            "logs/bot_errors.log",
+        ]
+        self.assertEqual(export_names, expected_names)
+        self.assertEqual(zip_names, expected_names)
+        self.assertEqual(written_count, len(expected_names))
 
 
 if __name__ == "__main__":
