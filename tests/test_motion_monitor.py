@@ -1,6 +1,10 @@
 import unittest
 
-from vision_bot_core.motion_monitor import MotionMonitor, MotionMonitorContext
+from vision_bot_core.motion_monitor import (
+    MotionMonitor,
+    MotionMonitorContext,
+    parse_person_filter_result,
+)
 
 
 class MotionMonitorTests(unittest.TestCase):
@@ -49,6 +53,12 @@ class MotionMonitorTests(unittest.TestCase):
             monitor.get_camera_status_for_dashboard(),
             (False, "Radar bật nhưng không mở được camera")
         )
+
+    def test_parse_person_filter_result(self):
+        self.assertTrue(parse_person_filter_result("PERSON"))
+        self.assertTrue(parse_person_filter_result("PERSON: một người đứng gần cửa"))
+        self.assertFalse(parse_person_filter_result("NO_PERSON"))
+        self.assertFalse(parse_person_filter_result("NO_PERSON: chỉ có rèm"))
 
 
 if __name__ == "__main__":

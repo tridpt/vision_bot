@@ -243,6 +243,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("camera_height", html)
         self.assertIn("camera_fps", html)
         self.assertIn("camera_rotation", html)
+        self.assertIn("person_filter_enabled", html)
         self.assertIn("/scan-cameras", html)
         self.assertIn("/test-camera", html)
 

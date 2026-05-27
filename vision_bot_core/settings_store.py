@@ -14,6 +14,7 @@ DEFAULT_SETTINGS = {
     "alert_video_fps": 10,
     "send_video": True,
     "use_gemini_analysis": True,
+    "person_filter_enabled": False,
     "alert_history_limit": 50,
     "camera_index": 0,
     "camera_width": 0,
@@ -46,6 +47,7 @@ SETTING_LABELS = {
     "alert_cooldown_seconds": "cooldown cảnh báo",
     "alert_video_seconds": "độ dài video",
     "alert_video_fps": "FPS video",
+    "person_filter_enabled": "chỉ cảnh báo khi thấy người",
     "alert_history_limit": "số cảnh báo giữ trong lịch sử",
     "camera_index": "camera index",
     "camera_width": "chiều rộng camera",
@@ -59,6 +61,7 @@ SETTING_UNITS = {
     "alert_cooldown_seconds": " giây",
     "alert_video_seconds": " giây",
     "alert_video_fps": "",
+    "person_filter_enabled": "",
     "alert_history_limit": " cảnh báo",
     "camera_index": "",
     "camera_width": " px",
@@ -72,6 +75,7 @@ SETTING_EXAMPLES = {
     "alert_cooldown_seconds": "20",
     "alert_video_seconds": "7",
     "alert_video_fps": "10",
+    "person_filter_enabled": "bat",
     "alert_history_limit": "50",
     "camera_index": "0",
     "camera_width": "1280",
@@ -133,6 +137,10 @@ def normalize_settings(raw_settings):
     normalized["use_gemini_analysis"] = normalize_bool(
         normalized["use_gemini_analysis"],
         DEFAULT_SETTINGS["use_gemini_analysis"]
+    )
+    normalized["person_filter_enabled"] = normalize_bool(
+        normalized["person_filter_enabled"],
+        DEFAULT_SETTINGS["person_filter_enabled"]
     )
     return normalized
 

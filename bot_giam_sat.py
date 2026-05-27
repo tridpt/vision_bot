@@ -256,6 +256,8 @@ bot.set_my_commands([
     telebot.types.BotCommand("/stop", "🟢 TẮT Radar: Cho phép camera đi ngủ"),
     telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất"),
     telebot.types.BotCommand("/settings", "Chỉnh độ nhạy, video, Gemini và camera"),
+    telebot.types.BotCommand("/person_filter_on", "Chỉ cảnh báo khi thấy người"),
+    telebot.types.BotCommand("/person_filter_off", "Tắt lọc người"),
     telebot.types.BotCommand("/scan_cameras", "Quét camera index 0-5"),
     telebot.types.BotCommand("/test_camera", "Chụp thử camera hiện tại"),
     telebot.types.BotCommand("/set_camera_index", "Chọn camera 0, 1 hoặc 2"),

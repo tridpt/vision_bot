@@ -17,6 +17,27 @@ from .camera_tools import (
 )
 
 
+PERSON_FILTER_PROMPT = (
+    "Bạn là bộ lọc cảnh báo an ninh. Chỉ trả lời đúng một từ: PERSON hoặc NO_PERSON.\n"
+    "Trả lời PERSON nếu trong ảnh có con người thật, dù chỉ thấy một phần cơ thể.\n"
+    "Trả lời NO_PERSON nếu không thấy người rõ ràng, chỉ thấy đồ vật, ánh sáng, rèm, màn hình, thú cưng hoặc nhiễu."
+)
+
+
+def parse_person_filter_result(text):
+    normalized = " ".join(str(text or "").strip().upper().replace("-", "_").split())
+    if not normalized:
+        return False
+    first_token = normalized.split(" ", 1)[0].strip(":.")
+    if first_token in ("NO_PERSON", "NO"):
+        return False
+    if first_token == "PERSON":
+        return True
+    if normalized.startswith("NO_PERSON") or "NO_PERSON" in normalized:
+        return False
+    return "PERSON" in normalized
+
+
 @dataclass
 class MotionMonitorContext:
     bot: object
@@ -175,6 +196,20 @@ class MotionMonitor:
                     video_status = "Không ghi video"
                     analysis = "Gemini đang tắt"
                     save_frame(image_path, img)
+
+                    if self.ctx.get_setting("person_filter_enabled"):
+                        try:
+                            person_filter_answer = self.ctx.ask_ai(image_path, PERSON_FILTER_PROMPT)
+                            if not parse_person_filter_result(person_filter_answer):
+                                try:
+                                    os.remove(image_path)
+                                except OSError as e:
+                                    self.ctx.log_error("Khong xoa duoc anh motion bi loc bo", e)
+                                last_gray_frame = gray
+                                continue
+                        except Exception as e:
+                            self.ctx.log_error("Gemini loi khi loc canh bao co nguoi", e)
+
                     self.ctx.bot.send_message(monitoring_chat_id, "🚨 BÁO ĐỘNG KÍCH HOẠT: Phát hiện có sự dịch chuyển lớn trong phòng!")
 
                     if self.ctx.get_setting("send_video"):

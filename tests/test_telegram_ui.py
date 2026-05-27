@@ -44,6 +44,7 @@ class TelegramUiTests(unittest.TestCase):
         ]
         self.assertIn("menu:scan_cameras", setting_callbacks)
         self.assertIn("menu:test_camera", setting_callbacks)
+        self.assertIn("setting:toggle_person_filter", setting_callbacks)
         self.assertTrue(telegram_ui.build_restart_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_clear_history_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_restore_settings_confirm_menu().keyboard)
@@ -79,6 +80,7 @@ class TelegramUiTests(unittest.TestCase):
             "camera_height": 720,
             "camera_fps": 30,
             "camera_rotation": 180,
+            "person_filter_enabled": True,
         })
 
         self.assertIn("8000", text)
@@ -86,6 +88,7 @@ class TelegramUiTests(unittest.TestCase):
         self.assertIn("50", text)
         self.assertIn("1280x720", text)
         self.assertIn("180", text)
+        self.assertIn("Lọc người", text)
 
 
 if __name__ == "__main__":

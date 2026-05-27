@@ -375,6 +375,16 @@ def register_telegram_handlers(ctx):
         if not verify_user(message): return
         set_boolean_setting(message, "use_gemini_analysis", False, "phân tích Gemini khi cảnh báo")
 
+    @bot.message_handler(commands=['person_filter_on'])
+    def turn_person_filter_on(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "person_filter_enabled", True, "lọc chỉ cảnh báo khi thấy người")
+
+    @bot.message_handler(commands=['person_filter_off'])
+    def turn_person_filter_off(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "person_filter_enabled", False, "lọc chỉ cảnh báo khi thấy người")
+
     @bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("menu:") or call.data.startswith("setting:")))
     def handle_menu_callback(call):
         if not verify_callback(call): return
@@ -590,6 +600,12 @@ def register_telegram_handlers(ctx):
         if call.data == "setting:toggle_ai":
             ctx.update_setting("use_gemini_analysis", not ctx.get_setting("use_gemini_analysis"))
             bot.answer_callback_query(call.id, "Đã cập nhật Gemini")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data == "setting:toggle_person_filter":
+            ctx.update_setting("person_filter_enabled", not ctx.get_setting("person_filter_enabled"))
+            bot.answer_callback_query(call.id, "Đã cập nhật lọc người")
             edit_menu_message(call, format_settings_message(), build_settings_menu())
             return
 

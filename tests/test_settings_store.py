@@ -55,6 +55,7 @@ class SettingsStoreTests(unittest.TestCase):
             "camera_height": -1,
             "camera_fps": "45",
             "camera_rotation": 181,
+            "person_filter_enabled": "on",
             "send_video": "off",
             "use_gemini_analysis": "yes",
         })
@@ -69,6 +70,7 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertEqual(normalized["camera_height"], 0)
         self.assertEqual(normalized["camera_fps"], 45)
         self.assertEqual(normalized["camera_rotation"], 180)
+        self.assertTrue(normalized["person_filter_enabled"])
         self.assertFalse(normalized["send_video"])
         self.assertTrue(normalized["use_gemini_analysis"])
 

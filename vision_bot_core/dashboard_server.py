@@ -438,7 +438,8 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
 
     for field, label in (
         ("send_video", "Gửi video cảnh báo"),
-        ("use_gemini_analysis", "Phân tích Gemini")
+        ("use_gemini_analysis", "Phân tích Gemini"),
+        ("person_filter_enabled", "Chỉ cảnh báo khi thấy người")
     ):
         rows.append(
             "<tr>"
@@ -525,6 +526,7 @@ def render_settings_backup_detail(ctx, data):
         **ctx.setting_labels,
         "send_video": "Gửi video cảnh báo",
         "use_gemini_analysis": "Phân tích Gemini",
+        "person_filter_enabled": "Chỉ cảnh báo khi thấy người",
     }
     ordered_keys = [
         "motion_area_threshold",
@@ -533,6 +535,7 @@ def render_settings_backup_detail(ctx, data):
         "alert_video_fps",
         "send_video",
         "use_gemini_analysis",
+        "person_filter_enabled",
         "alert_history_limit",
         "camera_index",
         "camera_width",
@@ -822,6 +825,10 @@ def update_dashboard_settings(ctx, form):
     updates["use_gemini_analysis"] = bool_from_dashboard(
         form.get("use_gemini_analysis", [current["use_gemini_analysis"]])[0],
         current["use_gemini_analysis"]
+    )
+    updates["person_filter_enabled"] = bool_from_dashboard(
+        form.get("person_filter_enabled", [current["person_filter_enabled"]])[0],
+        current["person_filter_enabled"]
     )
 
     for field, value in updates.items():

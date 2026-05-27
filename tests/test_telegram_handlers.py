@@ -58,6 +58,8 @@ class TelegramHandlersTests(unittest.TestCase):
         self.assertIn(("menu",), command_sets)
         self.assertIn(("status",), command_sets)
         self.assertIn(("settings",), command_sets)
+        self.assertIn(("person_filter_on",), command_sets)
+        self.assertIn(("person_filter_off",), command_sets)
         self.assertIn(("scan_cameras",), command_sets)
         self.assertIn(("test_camera",), command_sets)
         self.assertIn(("set_camera_index",), command_sets)
