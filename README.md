@@ -131,6 +131,7 @@ Trong `/menu` có các nút chính:
 - `Cài đặt`: chỉnh setting bằng nút hoặc nhập số trong chat.
 - `Xem backup`: liệt kê vài backup JSON gần nhất.
 - `Khôi phục setting`: khôi phục `settings.json` từ backup setting gần nhất.
+- `Khôi phục lịch sử`: khôi phục `alert_history.json` từ backup lịch sử gần nhất.
 - `Restart bot`: restart process bot.
 - `Dọn lịch sử`: xóa ảnh/video cảnh báo và `alert_history.json`.
 
@@ -175,7 +176,9 @@ Khi lịch sử vượt giới hạn setting, bot sẽ xóa record cũ và xóa 
 
 Trước khi đổi setting, cắt lịch sử, dọn toàn bộ lịch sử hoặc khôi phục setting, bot tự lưu backup JSON vào `logs/backups/`. Backup này chỉ lưu file cấu hình/lịch sử để nhẹ ổ cứng, không copy lại ảnh/video cảnh báo.
 
-Khôi phục setting nhanh: vào Telegram `/menu` > `Khôi phục setting` để lấy backup `settings_*.json` gần nhất. Khôi phục thủ công: tắt bot, copy file `settings_*.json` cần khôi phục thành `settings.json` hoặc copy file `alert_history_*.json` thành `logs/alert_history.json`, rồi chạy lại bot.
+Khôi phục nhanh: vào Telegram `/menu` > `Khôi phục setting` để lấy backup `settings_*.json` gần nhất, hoặc `Khôi phục lịch sử` để lấy backup `alert_history_*.json` gần nhất. Backup lịch sử chỉ chứa danh sách cảnh báo, không chứa lại ảnh/video nếu file media đã bị xóa khỏi `logs/`.
+
+Khôi phục thủ công: tắt bot, copy file `settings_*.json` cần khôi phục thành `settings.json` hoặc copy file `alert_history_*.json` thành `logs/alert_history.json`, rồi chạy lại bot.
 
 ## Xử lý lỗi thường gặp
 

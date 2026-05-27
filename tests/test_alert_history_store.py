@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +59,23 @@ class AlertHistoryStoreTests(unittest.TestCase):
             self.assertTrue(alert_history_store.delete_alert_history_entry("delete-me"))
             self.assertEqual(alert_history_store.get_alert_history_snapshot(), [])
             self.assertFalse(image.exists())
+
+    def test_restore_alert_history_from_file_saves_backup_entries_with_limit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root, log_dir, _ = self.configure_store(temp_dir, history_limit=10)
+            backup_file = root / "alert_history_backup.json"
+            backup_file.write_text(json.dumps([
+                {"id": "keep-1"},
+                {"id": "keep-2"},
+                {"bad": "entry"},
+                "not-a-dict",
+            ]), encoding="utf-8")
+
+            restored = alert_history_store.restore_alert_history_from_file(str(backup_file), limit=2)
+
+            self.assertEqual([entry.get("id") for entry in restored], ["keep-1", "keep-2"])
+            saved = json.loads((log_dir / "alert_history.json").read_text(encoding="utf-8"))
+            self.assertEqual([entry.get("id") for entry in saved], ["keep-1", "keep-2"])
 
 
 if __name__ == "__main__":

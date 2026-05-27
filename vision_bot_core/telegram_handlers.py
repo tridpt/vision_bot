@@ -13,6 +13,7 @@ from .telegram_ui import (
     build_clear_history_confirm_menu,
     build_main_menu,
     build_restart_confirm_menu,
+    build_restore_history_confirm_menu,
     build_restore_settings_confirm_menu,
     build_setting_prompt,
     build_settings_menu,
@@ -35,6 +36,7 @@ class TelegramHandlerContext:
     build_status_message: object
     list_backups: object
     restore_latest_settings_backup: object
+    restore_latest_alert_history_backup: object
     format_timestamp: object
     format_size: object
     send_alert_history: object
@@ -371,6 +373,46 @@ def register_telegram_handlers(ctx):
                 f"Thời gian backup: {ctx.format_timestamp(backup.get('created_at'))}\n\n"
                 f"{format_settings_message()}",
                 build_settings_menu()
+            )
+            return
+
+        if call.data == "menu:restore_history_confirm":
+            clear_pending_setting_input_from_call(call)
+            bot.answer_callback_query(call.id)
+            edit_menu_message(
+                call,
+                "↩️ KHÔI PHỤC LỊCH SỬ\n\nBot sẽ lấy file backup alert_history gần nhất trong logs/backups và ghi lại vào logs/alert_history.json. Lịch sử hiện tại sẽ được backup trước khi khôi phục.\n\nLưu ý: backup chỉ chứa danh sách cảnh báo, không chứa lại ảnh/video nếu file media đã bị xóa khỏi logs. Bạn chắc chắn muốn làm?",
+                build_restore_history_confirm_menu()
+            )
+            return
+
+        if call.data == "menu:restore_history_execute":
+            clear_pending_setting_input_from_call(call)
+            try:
+                restore_result = ctx.restore_latest_alert_history_backup()
+            except Exception as e:
+                ctx.log_error("Khoi phuc lich su canh bao that bai", e)
+                bot.answer_callback_query(call.id, "Khôi phục lịch sử thất bại", show_alert=True)
+                edit_menu_message(call, f"❌ Không thể khôi phục lịch sử: {e}", build_main_menu())
+                return
+
+            if restore_result is None:
+                bot.answer_callback_query(call.id, "Chưa có backup lịch sử", show_alert=True)
+                edit_menu_message(call, "💾 Chưa có backup lịch sử nào để khôi phục.", build_main_menu())
+                return
+
+            backup = restore_result["backup"]
+            restored_count = restore_result["restored_count"]
+            history_limit = restore_result["history_limit"]
+            bot.answer_callback_query(call.id, "Đã khôi phục lịch sử")
+            edit_menu_message(
+                call,
+                "✅ Đã khôi phục lịch sử gần nhất.\n\n"
+                f"File: {backup['filename']}\n"
+                f"Thời gian backup: {ctx.format_timestamp(backup.get('created_at'))}\n"
+                f"Số cảnh báo đã khôi phục: {restored_count}/{history_limit}\n\n"
+                "Bấm Lịch sử để xem lại các cảnh báo vừa khôi phục.",
+                build_main_menu()
             )
             return
 

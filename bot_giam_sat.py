@@ -16,8 +16,10 @@ from vision_bot_core.alert_history_store import (
     get_alert_history_snapshot,
     get_recent_alert_history,
     is_safe_alert_media_path,
+    load_alert_history_from_file,
     make_alert_id,
     relative_to_base,
+    restore_alert_history,
     text_preview,
     trim_alert_history as trim_alert_history_unprotected,
 )
@@ -175,6 +177,21 @@ def restore_latest_settings_backup():
     return {
         "backup": latest_backup,
         "settings": restored_settings,
+    }
+
+def restore_latest_alert_history_backup():
+    latest_backup = get_latest_backup(BACKUP_DIR, label="alert_history", log_error=log_error)
+    if latest_backup is None:
+        return None
+
+    history_limit = get_setting("alert_history_limit")
+    restored_history = load_alert_history_from_file(latest_backup["path"], limit=history_limit)
+    backup_runtime_state("before_restore_history", include_settings=False, include_history=True)
+    restored_history = restore_alert_history(restored_history)
+    return {
+        "backup": latest_backup,
+        "restored_count": len(restored_history),
+        "history_limit": history_limit,
     }
 
 configure_alert_history_store(
@@ -406,6 +423,7 @@ def create_telegram_handler_context():
         build_status_message=build_status_message,
         list_backups=get_recent_backups,
         restore_latest_settings_backup=restore_latest_settings_backup,
+        restore_latest_alert_history_backup=restore_latest_alert_history_backup,
         format_timestamp=format_timestamp,
         format_size=format_size,
         send_alert_history=send_alert_history,

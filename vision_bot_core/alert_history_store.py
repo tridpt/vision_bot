@@ -61,6 +61,19 @@ def load_alert_history_unlocked():
     return [entry for entry in history if isinstance(entry, dict)]
 
 
+def load_alert_history_from_file(history_file, limit=None):
+    with open(history_file, "r", encoding="utf-8") as file:
+        history = json.load(file)
+
+    if not isinstance(history, list):
+        history = []
+
+    restored_history = [entry for entry in history if isinstance(entry, dict)]
+    if limit is not None:
+        restored_history = restored_history[:limit]
+    return restored_history
+
+
 def save_alert_history_unlocked(history):
     ensure_log_dir()
     temp_file = f"{_alert_history_file}.tmp"
@@ -156,6 +169,17 @@ def trim_alert_history(limit):
         removed_history = history[limit:]
         save_alert_history_unlocked(kept_history)
         delete_alert_media_for_entries(removed_history)
+
+
+def restore_alert_history(history):
+    with _history_lock:
+        save_alert_history_unlocked(history)
+        return list(history)
+
+
+def restore_alert_history_from_file(history_file, limit=None):
+    history = load_alert_history_from_file(history_file, limit=limit)
+    return restore_alert_history(history)
 
 
 def clear_alert_history_files():
