@@ -41,6 +41,7 @@ class DashboardContext:
     restore_alert_history_backup: object
     restore_latest_settings_backup: object
     restore_latest_alert_history_backup: object
+    delete_backup: object
     clamp_int: object
     log_error: object
 
@@ -444,6 +445,13 @@ def restore_selected_dashboard_backup(ctx, filename):
     }
 
 
+def delete_selected_dashboard_backup(ctx, filename):
+    backup = find_dashboard_backup(ctx.list_backups(limit=20), filename)
+    if backup is None:
+        return False
+    return ctx.delete_backup(backup)
+
+
 def render_dashboard_backup_detail(ctx, backups, selected_filename):
     if not selected_filename:
         return ""
@@ -505,6 +513,21 @@ def render_selected_backup_restore_form(backup):
     )
 
 
+def render_selected_backup_delete_form(backup):
+    filename = backup.get("filename", "")
+    if not filename:
+        return ""
+
+    confirm_text = "Xóa backup này? Thao tác này chỉ xóa file JSON backup đã chọn."
+    return (
+        '<form class="inline-form" method="post" action="/delete-backup" '
+        f'onsubmit="return confirm(\'{escape_html(confirm_text)}\')">'
+        f'<input type="hidden" name="filename" value="{escape_html(filename)}">'
+        '<button class="delete-button" type="submit">Xóa</button>'
+        "</form>"
+    )
+
+
 def render_dashboard_backups(ctx, backups, selected_filename=""):
     actions = render_dashboard_backup_actions()
     if not backups:
@@ -522,6 +545,7 @@ def render_dashboard_backups(ctx, backups, selected_filename=""):
             if filename else ""
         )
         restore_form = render_selected_backup_restore_form(backup)
+        delete_form = render_selected_backup_delete_form(backup)
         rows.append(
             "<tr>"
             f"<td>{escape_html(backup_label_text(backup.get('label', 'unknown')))}</td>"
@@ -531,6 +555,7 @@ def render_dashboard_backups(ctx, backups, selected_filename=""):
             f"<td><code>{escape_html(filename)}</code></td>"
             f"<td>{detail_link}</td>"
             f"<td>{restore_form}</td>"
+            f"<td>{delete_form}</td>"
             "</tr>"
         )
 
@@ -540,7 +565,7 @@ def render_dashboard_backups(ctx, backups, selected_filename=""):
         '<p class="setting-note">Backup chỉ lưu file JSON cấu hình/lịch sử. Ảnh và video cảnh báo không được copy vào backup.</p>'
         '<div class="table-scroll">'
         "<table>"
-        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th><th>Nội dung</th><th>Khôi phục</th></tr></thead>"
+        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th><th>Nội dung</th><th>Khôi phục</th><th>Xóa</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         "</table>"
         "</div>"
@@ -913,6 +938,12 @@ def make_dashboard_handler(ctx):
                     notice = "Loại backup này chưa hỗ trợ khôi phục từ dashboard."
                 elif query.get("restore_selected") == ["error"]:
                     notice = "Không thể khôi phục backup đã chọn. Xem tab Log lỗi để biết chi tiết."
+                elif query.get("deleted_backup") == ["1"]:
+                    notice = "Đã xóa backup đã chọn."
+                elif query.get("deleted_backup") == ["0"]:
+                    notice = "Không tìm thấy backup đã chọn để xóa."
+                elif query.get("deleted_backup") == ["error"]:
+                    notice = "Không thể xóa backup đã chọn. Xem tab Log lỗi để biết chi tiết."
 
                 body = render_dashboard_html(
                     ctx,
@@ -996,6 +1027,20 @@ def make_dashboard_handler(ctx):
                         "kind": restored["kind"],
                         "count": restored["count"],
                     })
+                )
+                return
+
+            if parsed_url.path == "/delete-backup":
+                filename = form.get("filename", [""])[0]
+                try:
+                    deleted = delete_selected_dashboard_backup(ctx, filename)
+                    status = "1" if deleted else "0"
+                except Exception as e:
+                    ctx.log_error("Dashboard xoa backup that bai", e)
+                    status = "error"
+                redirect_dashboard(
+                    self,
+                    "/?" + urlencode({"tab": "backups", "deleted_backup": status})
                 )
                 return
 

@@ -200,6 +200,24 @@ def restore_alert_history_backup(backup):
         "history_limit": history_limit,
     }
 
+def delete_backup(backup):
+    backup_path = backup.get("path")
+    filename = backup.get("filename")
+    if not backup_path or not filename:
+        return False
+
+    absolute_backup_dir = os.path.abspath(BACKUP_DIR)
+    absolute_backup_path = os.path.abspath(backup_path)
+    if os.path.commonpath([absolute_backup_dir, absolute_backup_path]) != absolute_backup_dir:
+        raise RuntimeError("Duong dan backup khong hop le, da huy thao tac xoa.")
+    if os.path.basename(absolute_backup_path) != filename or not filename.endswith(".json"):
+        raise RuntimeError("Ten file backup khong hop le, da huy thao tac xoa.")
+    if not os.path.isfile(absolute_backup_path):
+        return False
+
+    os.remove(absolute_backup_path)
+    return True
+
 configure_alert_history_store(
     base_dir=BASE_DIR,
     log_dir=LOG_DIR,
@@ -395,6 +413,7 @@ def create_dashboard_context():
         restore_alert_history_backup=restore_alert_history_backup,
         restore_latest_settings_backup=restore_latest_settings_backup,
         restore_latest_alert_history_backup=restore_latest_alert_history_backup,
+        delete_backup=delete_backup,
         clamp_int=clamp_int,
         log_error=log_error
     )

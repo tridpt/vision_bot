@@ -5,6 +5,7 @@ from pathlib import Path
 
 from vision_bot_core.dashboard_server import (
     DashboardContext,
+    delete_selected_dashboard_backup,
     normalize_dashboard_tab,
     render_dashboard_html,
     restore_selected_dashboard_backup,
@@ -12,9 +13,11 @@ from vision_bot_core.dashboard_server import (
 from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
 
 
-def make_dashboard_context(settings_backup_path="", history_backup_path="", restored=None):
+def make_dashboard_context(settings_backup_path="", history_backup_path="", restored=None, deleted=None):
     if restored is None:
         restored = []
+    if deleted is None:
+        deleted = []
 
     return DashboardContext(
         host="127.0.0.1",
@@ -67,6 +70,7 @@ def make_dashboard_context(settings_backup_path="", history_backup_path="", rest
         },
         restore_latest_settings_backup=lambda: None,
         restore_latest_alert_history_backup=lambda: None,
+        delete_backup=lambda backup: deleted.append(backup) or True,
         clamp_int=lambda value, default, min_value, max_value: default,
         log_error=lambda context, error=None: None,
     )
@@ -85,6 +89,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('/restore-settings-backup', html)
         self.assertIn('/restore-history-backup', html)
         self.assertIn('/restore-selected-backup', html)
+        self.assertIn('/delete-backup', html)
         self.assertIn("Xem nội dung", html)
         self.assertIn("Khôi phục file này", html)
 
@@ -153,6 +158,21 @@ class DashboardServerTests(unittest.TestCase):
         result = restore_selected_dashboard_backup(make_dashboard_context(), "missing.json")
 
         self.assertEqual(result["status"], "0")
+
+    def test_delete_selected_dashboard_backup_uses_selected_file(self):
+        deleted = []
+        ctx = make_dashboard_context(deleted=deleted)
+
+        self.assertTrue(delete_selected_dashboard_backup(ctx, "settings_before_setting.json"))
+
+        self.assertEqual(deleted[0]["filename"], "settings_before_setting.json")
+
+    def test_delete_selected_dashboard_backup_rejects_unknown_file(self):
+        deleted = []
+        ctx = make_dashboard_context(deleted=deleted)
+
+        self.assertFalse(delete_selected_dashboard_backup(ctx, "missing.json"))
+        self.assertEqual(deleted, [])
 
 
 if __name__ == "__main__":
