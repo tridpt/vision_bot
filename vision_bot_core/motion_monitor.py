@@ -108,6 +108,10 @@ class MotionMonitor:
         with self._lock:
             return self._last_alert_timestamp
 
+    def get_monitoring_chat_id(self):
+        with self._lock:
+            return self._monitoring_chat_id
+
     def _get_monitoring_state(self):
         with self._lock:
             return self._auto_mode_active, self._monitoring_chat_id

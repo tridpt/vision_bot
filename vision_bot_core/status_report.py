@@ -30,6 +30,28 @@ def resolve_status_flag(flag, default=True):
         return default
 
 
+def safe_int(value, default):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def get_daily_summary_schedule(settings_snapshot):
+    enabled = resolve_status_flag(settings_snapshot.get("daily_summary_enabled"), default=False)
+    hour = safe_int(settings_snapshot.get("daily_summary_hour"), 8)
+    minute = safe_int(settings_snapshot.get("daily_summary_minute"), 0)
+    hour = max(0, min(hour, 23))
+    minute = max(0, min(minute, 59))
+    return enabled, hour, minute
+
+
+def format_daily_summary_schedule(settings_snapshot):
+    enabled, hour, minute = get_daily_summary_schedule(settings_snapshot)
+    status = "BẬT" if enabled else "TẮT"
+    return f"{status} lúc {hour:02d}:{minute:02d}"
+
+
 def format_duration(seconds):
     seconds = max(0, int(seconds))
     days, remainder = divmod(seconds, 86400)
@@ -85,6 +107,7 @@ def format_status_message(ctx):
     alert_count = ctx.get_alert_history_count()
     logs_size = format_size(get_directory_size(ctx.log_dir, log_error=ctx.log_error))
     settings_snapshot = ctx.get_settings_snapshot()
+    daily_summary_text = format_daily_summary_schedule(settings_snapshot)
 
     return (
         "🩺 TRẠNG THÁI SỨC KHỎE VISION BOT\n\n"
@@ -94,6 +117,7 @@ def format_status_message(ctx):
         f"🕒 Lần cảnh báo gần nhất: {alert_time}\n"
         f"ℹ️ Camera chi tiết: {camera_status}\n\n"
         "📊 THỐNG KÊ\n"
+        f"📅 Tóm tắt hằng ngày: {daily_summary_text}\n"
         f"🧾 Cảnh báo trong lịch sử: {alert_count}/{settings_snapshot['alert_history_limit']}\n"
         f"💾 Dung lượng logs: {logs_size}\n"
         f"⏳ Uptime: {uptime}\n"

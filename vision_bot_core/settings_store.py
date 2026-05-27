@@ -15,6 +15,9 @@ DEFAULT_SETTINGS = {
     "send_video": True,
     "use_gemini_analysis": True,
     "person_filter_enabled": False,
+    "daily_summary_enabled": False,
+    "daily_summary_hour": 8,
+    "daily_summary_minute": 0,
     "alert_history_limit": 50,
     "camera_index": 0,
     "camera_width": 0,
@@ -29,6 +32,8 @@ SETTING_LIMITS = {
     "alert_video_seconds": (5, 10),
     "alert_video_fps": (5, 30),
     "alert_history_limit": (10, 100),
+    "daily_summary_hour": (0, 23),
+    "daily_summary_minute": (0, 59),
     "camera_index": (0, 2),
     "camera_width": (0, 3840),
     "camera_height": (0, 2160),
@@ -48,6 +53,9 @@ SETTING_LABELS = {
     "alert_video_seconds": "độ dài video",
     "alert_video_fps": "FPS video",
     "person_filter_enabled": "chỉ cảnh báo khi thấy người",
+    "daily_summary_enabled": "gửi tóm tắt hằng ngày",
+    "daily_summary_hour": "giờ tóm tắt hằng ngày",
+    "daily_summary_minute": "phút tóm tắt hằng ngày",
     "alert_history_limit": "số cảnh báo giữ trong lịch sử",
     "camera_index": "camera index",
     "camera_width": "chiều rộng camera",
@@ -62,6 +70,9 @@ SETTING_UNITS = {
     "alert_video_seconds": " giây",
     "alert_video_fps": "",
     "person_filter_enabled": "",
+    "daily_summary_enabled": "",
+    "daily_summary_hour": "",
+    "daily_summary_minute": "",
     "alert_history_limit": " cảnh báo",
     "camera_index": "",
     "camera_width": " px",
@@ -76,6 +87,9 @@ SETTING_EXAMPLES = {
     "alert_video_seconds": "7",
     "alert_video_fps": "10",
     "person_filter_enabled": "bat",
+    "daily_summary_enabled": "bat",
+    "daily_summary_hour": "8",
+    "daily_summary_minute": "0",
     "alert_history_limit": "50",
     "camera_index": "0",
     "camera_width": "1280",
@@ -141,6 +155,10 @@ def normalize_settings(raw_settings):
     normalized["person_filter_enabled"] = normalize_bool(
         normalized["person_filter_enabled"],
         DEFAULT_SETTINGS["person_filter_enabled"]
+    )
+    normalized["daily_summary_enabled"] = normalize_bool(
+        normalized["daily_summary_enabled"],
+        DEFAULT_SETTINGS["daily_summary_enabled"]
     )
     return normalized
 

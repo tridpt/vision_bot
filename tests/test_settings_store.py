@@ -56,6 +56,9 @@ class SettingsStoreTests(unittest.TestCase):
             "camera_fps": "45",
             "camera_rotation": 181,
             "person_filter_enabled": "on",
+            "daily_summary_enabled": "yes",
+            "daily_summary_hour": 25,
+            "daily_summary_minute": "61",
             "send_video": "off",
             "use_gemini_analysis": "yes",
         })
@@ -71,6 +74,9 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertEqual(normalized["camera_fps"], 45)
         self.assertEqual(normalized["camera_rotation"], 180)
         self.assertTrue(normalized["person_filter_enabled"])
+        self.assertTrue(normalized["daily_summary_enabled"])
+        self.assertEqual(normalized["daily_summary_hour"], 23)
+        self.assertEqual(normalized["daily_summary_minute"], 59)
         self.assertFalse(normalized["send_video"])
         self.assertTrue(normalized["use_gemini_analysis"])
 

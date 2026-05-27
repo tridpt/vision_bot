@@ -207,6 +207,7 @@ def register_telegram_handlers(ctx):
                               "👉 Gõ lệnh `/auto` : BẬT Lưới Laser Tự động báo động.\n"
                               "👉 Gõ lệnh `/stop` : TẮT báo động, nhường đường lại cho tự nhiên.\n"
                               "👉 Gõ lệnh `/status` : Kiểm tra bot, radar, camera và cảnh báo gần nhất.\n"
+                              "👉 Gõ lệnh `/daily_summary_on` : Nhận tóm tắt trạng thái hằng ngày.\n"
                               "👉 Trong `/menu`, chọn Cài đặt hoặc Lịch sử để quản lý bot.\n"
                               "👉 Hoặc chỉ cần nhắn bất cứ gì (Tôi sẽ tự chụp 1 tấm để giải tỏa thắc mắc).")
 
@@ -384,6 +385,36 @@ def register_telegram_handlers(ctx):
     def turn_person_filter_off(message):
         if not verify_user(message): return
         set_boolean_setting(message, "person_filter_enabled", False, "lọc chỉ cảnh báo khi thấy người")
+
+    @bot.message_handler(commands=['daily_summary_on'])
+    def turn_daily_summary_on(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "daily_summary_enabled", True, "tóm tắt trạng thái hằng ngày")
+
+    @bot.message_handler(commands=['daily_summary_off'])
+    def turn_daily_summary_off(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "daily_summary_enabled", False, "tóm tắt trạng thái hằng ngày")
+
+    @bot.message_handler(commands=['set_daily_summary_hour'])
+    def set_daily_summary_hour(message):
+        if not verify_user(message): return
+        set_numeric_setting(
+            message,
+            "daily_summary_hour",
+            "/set_daily_summary_hour",
+            "giờ tóm tắt hằng ngày",
+        )
+
+    @bot.message_handler(commands=['set_daily_summary_minute'])
+    def set_daily_summary_minute(message):
+        if not verify_user(message): return
+        set_numeric_setting(
+            message,
+            "daily_summary_minute",
+            "/set_daily_summary_minute",
+            "phút tóm tắt hằng ngày",
+        )
 
     @bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("menu:") or call.data.startswith("setting:")))
     def handle_menu_callback(call):
@@ -606,6 +637,12 @@ def register_telegram_handlers(ctx):
         if call.data == "setting:toggle_person_filter":
             ctx.update_setting("person_filter_enabled", not ctx.get_setting("person_filter_enabled"))
             bot.answer_callback_query(call.id, "Đã cập nhật lọc người")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data == "setting:toggle_daily_summary":
+            ctx.update_setting("daily_summary_enabled", not ctx.get_setting("daily_summary_enabled"))
+            bot.answer_callback_query(call.id, "Đã cập nhật tóm tắt hằng ngày")
             edit_menu_message(call, format_settings_message(), build_settings_menu())
             return
 

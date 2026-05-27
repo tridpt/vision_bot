@@ -3,6 +3,7 @@ import sys
 import os
 import logging
 import subprocess
+import threading
 import time
 from logging.handlers import RotatingFileHandler
 from vision_bot_core.alert_history_store import (
@@ -52,6 +53,7 @@ from vision_bot_core.status_report import (
     format_size,
     format_status_message,
     get_directory_size,
+    get_daily_summary_schedule,
 )
 from vision_bot_core.telegram_ui import (
     format_alert_history_message,
@@ -254,10 +256,14 @@ bot.set_my_commands([
     telebot.types.BotCommand("/menu", "Mở menu điều khiển bằng nút bấm"),
     telebot.types.BotCommand("/auto", "🔴 BẬT Radar: Quét và báo động tự động 24/7"),
     telebot.types.BotCommand("/stop", "🟢 TẮT Radar: Cho phép camera đi ngủ"),
-    telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất"),
-    telebot.types.BotCommand("/settings", "Chỉnh độ nhạy, video, Gemini và camera"),
+    telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera, tóm tắt và cảnh báo gần nhất"),
+    telebot.types.BotCommand("/settings", "Chỉnh độ nhạy, video, Gemini, camera và tóm tắt"),
     telebot.types.BotCommand("/person_filter_on", "Chỉ cảnh báo khi thấy người"),
     telebot.types.BotCommand("/person_filter_off", "Tắt lọc người"),
+    telebot.types.BotCommand("/daily_summary_on", "Bật tóm tắt trạng thái hằng ngày"),
+    telebot.types.BotCommand("/daily_summary_off", "Tắt tóm tắt trạng thái hằng ngày"),
+    telebot.types.BotCommand("/set_daily_summary_hour", "Chỉnh giờ tóm tắt hằng ngày"),
+    telebot.types.BotCommand("/set_daily_summary_minute", "Chỉnh phút tóm tắt hằng ngày"),
     telebot.types.BotCommand("/scan_cameras", "Quét camera index 0-5"),
     telebot.types.BotCommand("/test_camera", "Chụp thử camera hiện tại"),
     telebot.types.BotCommand("/set_camera_index", "Chọn camera 0, 1 hoặc 2"),
@@ -563,6 +569,56 @@ def send_startup_notification():
 def build_status_message():
     return format_status_message(create_status_report_context())
 
+_daily_summary_thread = None
+
+
+def get_daily_summary_target_chat_id():
+    if CHIEC_CHIA_KHOA_ID_CUA_BAN != 0:
+        return CHIEC_CHIA_KHOA_ID_CUA_BAN
+    return motion_monitor.get_monitoring_chat_id()
+
+
+def daily_status_summary_loop():
+    last_sent_marker = None
+    last_missing_target_log_time = 0
+    while True:
+        try:
+            settings_snapshot = get_settings_snapshot()
+            enabled, hour, minute = get_daily_summary_schedule(settings_snapshot)
+            if not enabled:
+                last_sent_marker = None
+                time.sleep(30)
+                continue
+
+            now = time.localtime()
+            current_marker = time.strftime("%Y-%m-%d", now)
+            if now.tm_hour == hour and now.tm_min == minute and last_sent_marker != current_marker:
+                target_chat_id = get_daily_summary_target_chat_id()
+                if target_chat_id:
+                    try:
+                        bot.send_message(target_chat_id, build_status_message())
+                    except Exception as e:
+                        log_error("Khong gui duoc tom tat trang thai hang ngay", e)
+                    finally:
+                        last_sent_marker = current_marker
+                else:
+                    if time.time() - last_missing_target_log_time > 3600:
+                        log_error("Khong gui duoc tom tat trang thai hang ngay vi chua co chat dich")
+                        last_missing_target_log_time = time.time()
+        except Exception as e:
+            log_error("Loi trong vong lap daily_status_summary_loop", e)
+        time.sleep(30)
+
+
+def start_daily_status_summary_scheduler():
+    global _daily_summary_thread
+    if _daily_summary_thread is not None and _daily_summary_thread.is_alive():
+        return _daily_summary_thread
+
+    _daily_summary_thread = threading.Thread(target=daily_status_summary_loop, daemon=True)
+    _daily_summary_thread.start()
+    return _daily_summary_thread
+
 def get_recent_backups(limit=5):
     return list_backups(BACKUP_DIR, limit=limit, log_error=log_error)
 
@@ -591,6 +647,7 @@ def create_telegram_handler_context():
     )
 
 motion_monitor.start()
+start_daily_status_summary_scheduler()
 register_telegram_handlers(create_telegram_handler_context())
 
 if __name__ == "__main__":

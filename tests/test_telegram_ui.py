@@ -45,6 +45,7 @@ class TelegramUiTests(unittest.TestCase):
         self.assertIn("menu:scan_cameras", setting_callbacks)
         self.assertIn("menu:test_camera", setting_callbacks)
         self.assertIn("setting:toggle_person_filter", setting_callbacks)
+        self.assertIn("setting:toggle_daily_summary", setting_callbacks)
         self.assertTrue(telegram_ui.build_restart_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_clear_history_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_restore_settings_confirm_menu().keyboard)
@@ -53,6 +54,7 @@ class TelegramUiTests(unittest.TestCase):
     def test_formatters_include_expected_sections(self):
         self.assertIn("VISION BOT", telegram_ui.format_settings_message())
         self.assertIn("Camera:", telegram_ui.format_settings_message())
+        self.assertIn("Tóm tắt hằng ngày", telegram_ui.format_settings_message())
         self.assertIn("LOG", telegram_ui.format_error_log_message("line"))
         self.assertIn("Video:", telegram_ui.format_alert_history_message(
             [{"timestamp": 1, "video_status": "ok", "analysis": "motion"}],
@@ -75,6 +77,9 @@ class TelegramUiTests(unittest.TestCase):
             "send_video": True,
             "use_gemini_analysis": False,
             "alert_history_limit": 50,
+            "daily_summary_enabled": True,
+            "daily_summary_hour": 8,
+            "daily_summary_minute": 15,
             "camera_index": 1,
             "camera_width": 1280,
             "camera_height": 720,
@@ -89,6 +94,7 @@ class TelegramUiTests(unittest.TestCase):
         self.assertIn("1280x720", text)
         self.assertIn("180", text)
         self.assertIn("Lọc người", text)
+        self.assertIn("Tóm tắt BẬT lúc 08:15", text)
 
 
 if __name__ == "__main__":

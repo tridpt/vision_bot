@@ -244,6 +244,9 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("camera_fps", html)
         self.assertIn("camera_rotation", html)
         self.assertIn("person_filter_enabled", html)
+        self.assertIn("daily_summary_enabled", html)
+        self.assertIn("daily_summary_hour", html)
+        self.assertIn("daily_summary_minute", html)
         self.assertIn("/scan-cameras", html)
         self.assertIn("/test-camera", html)
 
@@ -255,6 +258,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("ĐANG CHẠY", html)
         self.assertIn("Camera", html)
         self.assertIn("CHẾT", html)
+        self.assertIn("Tóm tắt hằng ngày", html)
         self.assertIn("Lần cảnh báo gần nhất", html)
 
     def test_render_history_tab_paginates_alerts(self):

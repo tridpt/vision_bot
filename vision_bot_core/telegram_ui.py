@@ -1,6 +1,7 @@
 import telebot
 
 from .alert_history_store import text_preview
+from .status_report import format_daily_summary_schedule
 from .settings_store import (
     CAMERA_INDEX_CHOICES,
     CAMERA_ROTATION_CHOICES,
@@ -78,6 +79,7 @@ def format_settings_message():
         f"📹 Gửi video: {on_off_label(current['send_video'])}\n"
         f"🧠 Phân tích Gemini: {on_off_label(current['use_gemini_analysis'])}\n\n"
         f"🧍 Chỉ cảnh báo khi thấy người: {on_off_label(current['person_filter_enabled'])}\n"
+        f"📅 Tóm tắt hằng ngày: {format_daily_summary_schedule(current)}\n"
         f"📷 Camera: index {current['camera_index']} | {camera_resolution} | {camera_fps} | xoay {current['camera_rotation']} độ\n"
         f"🧾 Giữ lịch sử: {current['alert_history_limit']} cảnh báo\n\n"
         "Bấm nút bên dưới để chỉnh. Với các mục số, bot sẽ hỏi và bạn chỉ cần nhập số mới vào khung chat."
@@ -171,6 +173,7 @@ def build_settings_menu():
     video_label = "📹 Tắt video" if current["send_video"] else "📹 Bật video"
     ai_label = "🧠 Tắt Gemini" if current["use_gemini_analysis"] else "🧠 Bật Gemini"
     person_filter_label = "🧍 Tắt lọc người" if current["person_filter_enabled"] else "🧍 Bật lọc người"
+    daily_summary_label = "📅 Tắt tóm tắt" if current["daily_summary_enabled"] else "📅 Bật tóm tắt"
     camera_index_buttons = [
         telebot.types.InlineKeyboardButton(
             f"{'✅ ' if current['camera_index'] == choice else ''}Cam {choice}",
@@ -207,6 +210,11 @@ def build_settings_menu():
         telebot.types.InlineKeyboardButton(ai_label, callback_data="setting:toggle_ai")
     )
     keyboard.add(telebot.types.InlineKeyboardButton(person_filter_label, callback_data="setting:toggle_person_filter"))
+    keyboard.add(telebot.types.InlineKeyboardButton(daily_summary_label, callback_data="setting:toggle_daily_summary"))
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("📅 Nhập giờ tóm tắt", callback_data="setting:input:daily_summary_hour"),
+        telebot.types.InlineKeyboardButton("📅 Nhập phút tóm tắt", callback_data="setting:input:daily_summary_minute")
+    )
     keyboard.add(
         telebot.types.InlineKeyboardButton("📷 Nhập rộng", callback_data="setting:input:camera_width"),
         telebot.types.InlineKeyboardButton("📷 Nhập cao", callback_data="setting:input:camera_height")
@@ -234,6 +242,7 @@ def format_settings_snapshot(settings_snapshot):
         f"Gửi video {on_off_label(settings_snapshot['send_video'])} | "
         f"Gemini {on_off_label(settings_snapshot['use_gemini_analysis'])} | "
         f"Lọc người {on_off_label(settings_snapshot['person_filter_enabled'])} | "
+        f"Tóm tắt {format_daily_summary_schedule(settings_snapshot)} | "
         f"Camera {settings_snapshot['camera_index']} "
         f"{settings_snapshot['camera_width']}x{settings_snapshot['camera_height']} "
         f"{settings_snapshot['camera_fps']}fps xoay {settings_snapshot['camera_rotation']}° | "

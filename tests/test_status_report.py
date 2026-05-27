@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from vision_bot_core.status_report import (
+    format_daily_summary_schedule,
     StatusReportContext,
     format_duration,
     format_size,
@@ -45,7 +46,12 @@ class StatusReportTests(unittest.TestCase):
                 is_radar_active=lambda: True,
                 get_last_alert_timestamp=lambda: 123,
                 get_alert_history_count=lambda: 2,
-                get_settings_snapshot=lambda: {"alert_history_limit": 50},
+                get_settings_snapshot=lambda: {
+                    "alert_history_limit": 50,
+                    "daily_summary_enabled": True,
+                    "daily_summary_hour": 8,
+                    "daily_summary_minute": 15,
+                },
                 format_timestamp=lambda timestamp: f"time-{timestamp}",
                 format_settings_snapshot=lambda settings: "settings-summary",
                 is_bot_running=lambda: True,
@@ -59,10 +65,22 @@ class StatusReportTests(unittest.TestCase):
             self.assertIn("Camera OK", message)
             self.assertIn("time-123", message)
             self.assertIn("Lần cảnh báo gần nhất", message)
+            self.assertIn("Tóm tắt hằng ngày: BẬT lúc 08:15", message)
             self.assertIn("2/50", message)
             self.assertIn("1.0 KB", message)
             self.assertIn("http://127.0.0.1:8765", message)
             self.assertIn("settings-summary", message)
+
+    def test_format_daily_summary_schedule_uses_defaults_and_clamps(self):
+        self.assertEqual(format_daily_summary_schedule({}), "TẮT lúc 08:00")
+        self.assertEqual(
+            format_daily_summary_schedule({
+                "daily_summary_enabled": "on",
+                "daily_summary_hour": 99,
+                "daily_summary_minute": -5,
+            }),
+            "BẬT lúc 23:00"
+        )
 
 
 if __name__ == "__main__":

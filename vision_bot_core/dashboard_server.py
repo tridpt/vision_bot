@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
+from .status_report import format_daily_summary_schedule
+
 
 @dataclass
 class DashboardContext:
@@ -374,6 +376,8 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
         "alert_cooldown_seconds",
         "alert_video_seconds",
         "alert_video_fps",
+        "daily_summary_hour",
+        "daily_summary_minute",
         "camera_width",
         "camera_height",
         "camera_fps"
@@ -384,6 +388,10 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
         hint = f"{min_value}-{max_value}{escape_html(ctx.setting_units[field])}"
         if field in ("camera_width", "camera_height", "camera_fps"):
             hint = f"{hint}. Nhập 0 để dùng mặc định của camera."
+        if field == "daily_summary_hour":
+            hint = "0-23 giờ local của máy đang chạy bot."
+        if field == "daily_summary_minute":
+            hint = "0-59 phút local của máy đang chạy bot."
         rows.append(
             "<tr>"
             f'<th><label for="setting_{field}">{escape_html(ctx.setting_labels[field])}</label></th>'
@@ -433,6 +441,19 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
         "<td>"
         f'<select id="setting_alert_history_limit" name="alert_history_limit">{history_options}</select>'
         '<span class="setting-hint">Khi giảm số lượng, bot xóa record cũ và media tương ứng.</span>'
+        "</td>"
+        "</tr>"
+        )
+
+    rows.append(
+        "<tr>"
+        f'<th><label for="setting_daily_summary_enabled">{escape_html(ctx.setting_labels["daily_summary_enabled"])}</label></th>'
+        "<td>"
+        f'<select id="setting_daily_summary_enabled" name="daily_summary_enabled">'
+        f'<option value="true"{selected_attr(settings_snapshot["daily_summary_enabled"], True)}>BẬT</option>'
+        f'<option value="false"{selected_attr(settings_snapshot["daily_summary_enabled"], False)}>TẮT</option>'
+        "</select>"
+        '<span class="setting-hint">Tự động gửi một bản tóm tắt trạng thái hằng ngày đến Telegram.</span>'
         "</td>"
         "</tr>"
     )
@@ -537,6 +558,9 @@ def render_settings_backup_detail(ctx, data):
         "send_video",
         "use_gemini_analysis",
         "person_filter_enabled",
+        "daily_summary_enabled",
+        "daily_summary_hour",
+        "daily_summary_minute",
         "alert_history_limit",
         "camera_index",
         "camera_width",
@@ -842,6 +866,10 @@ def update_dashboard_settings(ctx, form):
         form.get("person_filter_enabled", [current["person_filter_enabled"]])[0],
         current["person_filter_enabled"]
     )
+    updates["daily_summary_enabled"] = bool_from_dashboard(
+        form.get("daily_summary_enabled", [current["daily_summary_enabled"]])[0],
+        current["daily_summary_enabled"]
+    )
 
     for field, value in updates.items():
         ctx.update_setting(field, value)
@@ -884,6 +912,7 @@ def render_dashboard_html(
     bot_class = "ok" if bot_ok else "bad"
     radar_status = "BẬT" if ctx.is_radar_active() else "TẮT"
     camera_health = "SỐNG" if camera_ok else "CHẾT"
+    daily_summary_text = format_daily_summary_schedule(settings_snapshot)
     logs_size = ctx.format_size(ctx.get_directory_size(ctx.log_dir))
     uptime = ctx.format_duration(time.time() - ctx.bot_start_time)
     last_alert_text = ctx.format_timestamp(ctx.last_alert_timestamp())
@@ -904,6 +933,7 @@ def render_dashboard_html(
       <div class="card"><span>Radar</span><strong>{escape_html(radar_status)}</strong></div>
       <div class="card"><span>Camera</span><strong class="{camera_class}">{escape_html(camera_health)}</strong></div>
       <div class="card"><span>Lần cảnh báo</span><strong>{escape_html(last_alert_text)}</strong></div>
+      <div class="card"><span>Tóm tắt hằng ngày</span><strong>{escape_html(daily_summary_text)}</strong></div>
       <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
     </section>
 
@@ -913,6 +943,7 @@ def render_dashboard_html(
         <tr><th>Bot</th><td>{escape_html(bot_status)}</td></tr>
         <tr><th>Radar</th><td>{escape_html(radar_status)}</td></tr>
         <tr><th>Camera</th><td>{escape_html(camera_health)} - {escape_html(camera_status)}</td></tr>
+        <tr><th>Tóm tắt hằng ngày</th><td>{escape_html(daily_summary_text)}</td></tr>
         <tr><th>Lần cảnh báo gần nhất</th><td>{escape_html(last_alert_text)}</td></tr>
         <tr><th>Uptime</th><td>{escape_html(uptime)}</td></tr>
         <tr><th>Dashboard local</th><td>{escape_html(ctx.url)}</td></tr>
