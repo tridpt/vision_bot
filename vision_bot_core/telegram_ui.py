@@ -212,6 +212,10 @@ def build_settings_menu():
         telebot.types.InlineKeyboardButton("📷 Nhập FPS camera", callback_data="setting:input:camera_fps"),
         telebot.types.InlineKeyboardButton("📷 Nhập camera index", callback_data="setting:input:camera_index")
     )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("🔎 Quét camera", callback_data="menu:scan_cameras"),
+        telebot.types.InlineKeyboardButton("🧪 Test camera", callback_data="menu:test_camera")
+    )
     keyboard.add(*camera_index_buttons)
     keyboard.add(*camera_rotation_buttons)
     keyboard.add(*history_buttons)

@@ -1,3 +1,4 @@
+import base64
 import html
 import json
 import mimetypes
@@ -38,6 +39,8 @@ class DashboardContext:
     delete_alert_history_entry: object
     update_setting: object
     trim_alert_history: object
+    scan_cameras: object
+    test_camera: object
     list_backups: object
     restore_settings_backup: object
     restore_alert_history_backup: object
@@ -455,6 +458,10 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
         '<button class="save-button" type="submit">Lưu setting</button>'
         '<p class="setting-note">Setting được lưu vào settings.json và vẫn còn sau khi restart bot.</p>'
         "</form>"
+        '<div class="camera-actions">'
+        '<a class="secondary-button" href="/scan-cameras">Quét camera</a>'
+        '<a class="secondary-button" href="/test-camera">Chụp thử camera</a>'
+        "</div>"
     )
 
 
@@ -1001,9 +1008,10 @@ def render_dashboard_html(
     .setting-note {{ color: var(--muted); margin: 12px 0 0; }}
     .save-button {{ margin-top: 12px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 9px 13px; }}
     .secondary-button {{ margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; font: inherit; font-weight: 700; padding: 9px 13px; }}
-    .backup-actions {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }}
+    .backup-actions, .camera-actions {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }}
+    .camera-actions {{ margin-top: 12px; }}
     .backup-actions form {{ margin: 0; }}
-    .backup-actions .save-button, .backup-actions .secondary-button {{ margin-top: 0; }}
+    .backup-actions .save-button, .backup-actions .secondary-button, .camera-actions .secondary-button {{ margin-top: 0; text-decoration: none; display: inline-block; }}
     .backup-detail {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; }}
     .backup-detail h3 {{ font-size: 15px; margin: 0 0 10px; }}
     .backup-summary {{ display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); }}
@@ -1243,6 +1251,73 @@ def redirect_dashboard(handler, location):
     handler.end_headers()
 
 
+def send_dashboard_html(handler, body_html, title="Vision Bot Dashboard"):
+    body = f"""<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape_html(title)}</title>
+  <style>
+    body {{ margin: 0; font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fb; color: #172033; }}
+    main {{ max-width: 860px; margin: 0 auto; padding: 24px; }}
+    .panel {{ background: #fff; border: 1px solid #d9e0ea; border-radius: 8px; padding: 16px; }}
+    pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
+    a {{ color: #006d77; font-weight: 700; text-decoration: none; }}
+    img {{ width: 100%; max-height: 620px; object-fit: contain; border: 1px solid #d9e0ea; border-radius: 6px; background: #000; }}
+  </style>
+</head>
+<body><main>{body_html}</main></body>
+</html>""".encode("utf-8")
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def serve_dashboard_camera_scan(ctx, handler):
+    scan_text = ctx.scan_cameras()
+    send_dashboard_html(
+        handler,
+        '<section class="panel">'
+        '<h1>Quét camera</h1>'
+        f"<pre>{escape_html(scan_text)}</pre>"
+        '<p><a href="/?tab=settings">Quay lại Setting</a></p>'
+        "</section>",
+        title="Quét camera"
+    )
+
+
+def serve_dashboard_camera_test(ctx, handler):
+    result = ctx.test_camera()
+    image_html = ""
+    image_path = result.get("path") if isinstance(result, dict) else ""
+    if isinstance(result, dict) and result.get("ok") and image_path and os.path.isfile(image_path):
+        try:
+            with open(image_path, "rb") as image_file:
+                image_bytes = image_file.read()
+            content_type = mimetypes.guess_type(image_path)[0] or "image/jpeg"
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            image_html = f'<img src="data:{content_type};base64,{encoded}" alt="Ảnh test camera">'
+        except OSError as e:
+            ctx.log_error(f"Dashboard khong doc duoc anh test camera: {image_path}", e)
+            image_html = '<p>Không đọc được ảnh test camera.</p>'
+
+    message = result.get("message", "Không có kết quả test camera.") if isinstance(result, dict) else str(result)
+    send_dashboard_html(
+        handler,
+        '<section class="panel">'
+        '<h1>Chụp thử camera</h1>'
+        f"<pre>{escape_html(message)}</pre>"
+        f"{image_html}"
+        '<p><a href="/?tab=settings">Quay lại Setting</a></p>'
+        "</section>",
+        title="Chụp thử camera"
+    )
+
+
 def make_dashboard_handler(ctx):
     class DashboardRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -1323,6 +1398,14 @@ def make_dashboard_handler(ctx):
 
             if parsed_url.path == "/download-history-zip":
                 serve_dashboard_history_zip(ctx, self)
+                return
+
+            if parsed_url.path == "/scan-cameras":
+                serve_dashboard_camera_scan(ctx, self)
+                return
+
+            if parsed_url.path == "/test-camera":
+                serve_dashboard_camera_test(ctx, self)
                 return
 
             self.send_error(404)

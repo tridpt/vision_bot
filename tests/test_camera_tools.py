@@ -50,6 +50,20 @@ class CameraToolsTests(unittest.TestCase):
         self.assertIn("camera 2", text)
         self.assertIn("xoay 90", text)
 
+    def test_format_camera_scan_results_marks_current_and_working_cameras(self):
+        text = camera_tools.format_camera_scan_results(
+            [
+                {"index": 0, "opened": True, "frame_ok": True, "width": 640, "height": 480},
+                {"index": 1, "opened": False, "frame_ok": False, "width": 0, "height": 0},
+            ],
+            current_index=0,
+        )
+
+        self.assertIn("Cam 0: OK - 640x480", text)
+        self.assertIn("đang dùng", text)
+        self.assertIn("Cam 1: không mở được", text)
+        self.assertIn("Camera dùng được: 0", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,8 @@ class TelegramHandlerContext:
     format_size: object
     send_alert_history: object
     capture_and_analyze_environment: object
+    scan_cameras: object
+    test_camera: object
     schedule_bot_restart: object
     tail_error_log: object
     log_error: object
@@ -206,7 +208,7 @@ def register_telegram_handlers(ctx):
                               "👉 Gõ lệnh `/stop` : TẮT báo động, nhường đường lại cho tự nhiên.\n"
                               "👉 Gõ lệnh `/status` : Kiểm tra bot, radar, camera và cảnh báo gần nhất.\n"
                               "👉 Trong `/menu`, chọn Cài đặt hoặc Lịch sử để quản lý bot.\n"
-                              "👉 Hoặc просто Nhắn bất cứ gì (Tôi sẽ tự chụp 1 tấm để giải tỏa thắc mắc).")
+                              "👉 Hoặc chỉ cần nhắn bất cứ gì (Tôi sẽ tự chụp 1 tấm để giải tỏa thắc mắc).")
 
     @bot.message_handler(commands=['menu'])
     def send_menu(message):
@@ -245,6 +247,18 @@ def register_telegram_handlers(ctx):
         if not verify_user(message): return
         clear_pending_setting_input(message)
         bot.reply_to(message, format_settings_message(), reply_markup=build_settings_menu())
+
+    @bot.message_handler(commands=['scan_cameras'])
+    def scan_cameras(message):
+        if not verify_user(message): return
+        clear_pending_setting_input(message)
+        ctx.scan_cameras(message.chat.id)
+
+    @bot.message_handler(commands=['test_camera'])
+    def test_camera(message):
+        if not verify_user(message): return
+        clear_pending_setting_input(message)
+        ctx.test_camera(message.chat.id)
 
     @bot.message_handler(commands=['set_sensitivity'])
     def set_sensitivity(message):
@@ -394,6 +408,19 @@ def register_telegram_handlers(ctx):
                 call.message.chat.id,
                 "Hãy mô tả ngắn gọn camera hiện đang thấy gì và có điều gì đáng chú ý không?"
             )
+            return
+
+        if call.data == "menu:scan_cameras":
+            clear_pending_setting_input_from_call(call)
+            bot.answer_callback_query(call.id, "Đang quét camera")
+            edit_menu_message(call, "🔎 Đang quét camera index 0-5...", build_settings_menu())
+            ctx.scan_cameras(call.message.chat.id)
+            return
+
+        if call.data == "menu:test_camera":
+            clear_pending_setting_input_from_call(call)
+            bot.answer_callback_query(call.id, "Đang chụp thử camera")
+            ctx.test_camera(call.message.chat.id)
             return
 
         if call.data == "menu:history":

@@ -4,6 +4,9 @@ import time
 import cv2
 
 
+DEFAULT_CAMERA_SCAN_INDICES = range(6)
+
+
 def normalize_camera_config(camera_config=None, camera_index=0):
     config = camera_config or {}
     return {
@@ -13,6 +16,12 @@ def normalize_camera_config(camera_config=None, camera_index=0):
         "camera_fps": int(config.get("camera_fps", 0) or 0),
         "camera_rotation": int(config.get("camera_rotation", 0) or 0),
     }
+
+
+def camera_config_with_index(camera_config, camera_index):
+    config = normalize_camera_config(camera_config)
+    config["camera_index"] = int(camera_index)
+    return config
 
 
 def apply_camera_config(camera, config):
@@ -85,6 +94,94 @@ def check_camera_once(camera_index=0, camera_config=None):
         return False, f"Mở được {format_camera_config(config)} nhưng không đọc được ảnh"
     finally:
         camera.release()
+
+
+def probe_camera(camera_index=0, camera_config=None, warmup_seconds=0.25):
+    config = camera_config_with_index(camera_config, camera_index)
+    camera = None
+    try:
+        camera = open_camera(camera_config=config)
+        if warmup_seconds > 0:
+            time.sleep(warmup_seconds)
+
+        opened = camera.isOpened()
+        if not opened:
+            return {
+                "index": camera_index,
+                "opened": False,
+                "frame_ok": False,
+                "width": 0,
+                "height": 0,
+                "status": "Không mở được camera",
+            }
+
+        success, frame = camera.read()
+        if not success:
+            return {
+                "index": camera_index,
+                "opened": True,
+                "frame_ok": False,
+                "width": 0,
+                "height": 0,
+                "status": "Mở được nhưng không đọc được ảnh",
+            }
+
+        transformed = transform_camera_frame(frame, config)
+        height, width = transformed.shape[:2]
+        return {
+            "index": camera_index,
+            "opened": True,
+            "frame_ok": True,
+            "width": width,
+            "height": height,
+            "status": f"Đọc được ảnh {width}x{height}",
+        }
+    except Exception as e:
+        return {
+            "index": camera_index,
+            "opened": False,
+            "frame_ok": False,
+            "width": 0,
+            "height": 0,
+            "status": f"Lỗi: {e}",
+        }
+    finally:
+        if camera is not None:
+            camera.release()
+
+
+def scan_camera_indices(indices=DEFAULT_CAMERA_SCAN_INDICES, camera_config=None):
+    return [
+        probe_camera(camera_index=index, camera_config=camera_config)
+        for index in indices
+    ]
+
+
+def format_camera_probe_result(result):
+    index = result.get("index")
+    if result.get("frame_ok"):
+        return f"Cam {index}: OK - {result.get('width')}x{result.get('height')}"
+    if result.get("opened"):
+        return f"Cam {index}: mở được nhưng không đọc được ảnh"
+    return f"Cam {index}: không mở được"
+
+
+def format_camera_scan_results(results, current_index=None):
+    lines = ["🔎 KẾT QUẢ QUÉT CAMERA"]
+    working_indices = []
+    for result in results:
+        if result.get("frame_ok"):
+            working_indices.append(str(result.get("index")))
+        marker = " ← đang dùng" if result.get("index") == current_index else ""
+        lines.append(f"{format_camera_probe_result(result)}{marker}")
+
+    if working_indices:
+        lines.append("")
+        lines.append(f"Camera dùng được: {', '.join(working_indices)}")
+    else:
+        lines.append("")
+        lines.append("Không tìm thấy camera nào đọc được ảnh.")
+    return "\n".join(lines)
 
 
 def warm_up_camera(camera_stream, delay_seconds=1.5, buffer_reads=5):

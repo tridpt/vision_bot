@@ -40,6 +40,8 @@ class TelegramHandlersTests(unittest.TestCase):
             format_size=lambda size: str(size),
             send_alert_history=lambda chat_id: None,
             capture_and_analyze_environment=lambda chat_id, question, reply_to_message=None: None,
+            scan_cameras=lambda chat_id: None,
+            test_camera=lambda chat_id: None,
             schedule_bot_restart=lambda: None,
             tail_error_log=lambda: "log",
             log_error=lambda context, error=None: None,
@@ -56,6 +58,8 @@ class TelegramHandlersTests(unittest.TestCase):
         self.assertIn(("menu",), command_sets)
         self.assertIn(("status",), command_sets)
         self.assertIn(("settings",), command_sets)
+        self.assertIn(("scan_cameras",), command_sets)
+        self.assertIn(("test_camera",), command_sets)
         self.assertIn(("set_camera_index",), command_sets)
         self.assertIn(("set_camera_width",), command_sets)
         self.assertIn(("set_camera_height",), command_sets)

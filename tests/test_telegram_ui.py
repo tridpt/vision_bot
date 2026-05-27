@@ -37,6 +37,13 @@ class TelegramUiTests(unittest.TestCase):
         self.assertEqual(len(restore_buttons), 1)
         self.assertEqual(len(restore_history_buttons), 1)
         self.assertTrue(telegram_ui.build_settings_menu().keyboard)
+        setting_callbacks = [
+            button.callback_data
+            for row in telegram_ui.build_settings_menu().keyboard
+            for button in row
+        ]
+        self.assertIn("menu:scan_cameras", setting_callbacks)
+        self.assertIn("menu:test_camera", setting_callbacks)
         self.assertTrue(telegram_ui.build_restart_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_clear_history_confirm_menu().keyboard)
         self.assertTrue(telegram_ui.build_restore_settings_confirm_menu().keyboard)

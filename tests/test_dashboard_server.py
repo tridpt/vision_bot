@@ -59,6 +59,8 @@ def make_dashboard_context(
         delete_alert_history_entry=lambda alert_id: False,
         update_setting=lambda name, value: None,
         trim_alert_history=lambda limit: None,
+        scan_cameras=lambda: "scan result",
+        test_camera=lambda: {"ok": False, "message": "test result", "path": ""},
         list_backups=lambda limit=20: [
             {
                 "label": "settings",
@@ -241,6 +243,8 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("camera_height", html)
         self.assertIn("camera_fps", html)
         self.assertIn("camera_rotation", html)
+        self.assertIn("/scan-cameras", html)
+        self.assertIn("/test-camera", html)
 
     def test_render_history_tab_paginates_alerts(self):
         entries = [

@@ -25,8 +25,11 @@ from vision_bot_core.alert_history_store import (
 )
 from vision_bot_core.backup_store import backup_json_files, get_latest_backup, list_backups
 from vision_bot_core.camera_tools import (
+    format_camera_config,
+    format_camera_scan_results,
     read_camera_frame,
     save_frame,
+    scan_camera_indices,
 )
 from vision_bot_core.dashboard_server import DashboardContext, start_dashboard_server
 from vision_bot_core.gemini_analyzer import ask_ai, configure_gemini_analyzer
@@ -253,6 +256,8 @@ bot.set_my_commands([
     telebot.types.BotCommand("/stop", "🟢 TẮT Radar: Cho phép camera đi ngủ"),
     telebot.types.BotCommand("/status", "Xem trạng thái bot, radar, camera và cảnh báo gần nhất"),
     telebot.types.BotCommand("/settings", "Chỉnh độ nhạy, video, Gemini và camera"),
+    telebot.types.BotCommand("/scan_cameras", "Quét camera index 0-5"),
+    telebot.types.BotCommand("/test_camera", "Chụp thử camera hiện tại"),
     telebot.types.BotCommand("/set_camera_index", "Chọn camera 0, 1 hoặc 2"),
     telebot.types.BotCommand("/set_camera_width", "Chỉnh chiều rộng camera"),
     telebot.types.BotCommand("/set_camera_height", "Chỉnh chiều cao camera"),
@@ -307,6 +312,111 @@ def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
                     bot.send_video(chat_id, video, caption=f"🎥 Video cảnh báo #{index}")
             except Exception as e:
                 log_error(f"Khong gui duoc video lich su #{index}", e)
+
+
+def run_camera_action_with_radar_paused(action):
+    was_auto = motion_monitor.is_radar_active()
+    if was_auto:
+        motion_monitor.set_radar_state(False)
+        time.sleep(1.5)
+
+    try:
+        return action()
+    finally:
+        if was_auto:
+            motion_monitor.set_radar_state(True)
+
+
+def build_camera_scan_message():
+    settings_snapshot = get_settings_snapshot()
+    results = run_camera_action_with_radar_paused(
+        lambda: scan_camera_indices(range(6), camera_config=settings_snapshot)
+    )
+    return format_camera_scan_results(
+        results,
+        current_index=settings_snapshot["camera_index"]
+    )
+
+
+def capture_camera_test_image():
+    settings_snapshot = get_settings_snapshot()
+    success, img = run_camera_action_with_radar_paused(
+        lambda: read_camera_frame(warmup_seconds=1, camera_config=settings_snapshot)
+    )
+    camera_text = format_camera_config(settings_snapshot)
+    if not success:
+        return {
+            "ok": False,
+            "message": f"Không đọc được ảnh từ {camera_text}.",
+            "path": "",
+        }
+
+    os.makedirs(LOG_DIR, exist_ok=True)
+    image_path = os.path.join(LOG_DIR, "camera_test.jpg")
+    save_frame(image_path, img)
+    return {
+        "ok": True,
+        "message": f"Test camera OK\n{camera_text}",
+        "path": image_path,
+    }
+
+
+def scan_cameras_for_chat(chat_id):
+    bot.send_message(chat_id, "🔎 Đang quét camera index 0-5...")
+
+    try:
+        bot.send_message(chat_id, build_camera_scan_message())
+    except Exception as e:
+        log_error("Quet camera that bai", e)
+        bot.send_message(chat_id, f"❌ Không quét được camera: {e}")
+
+
+def test_camera_for_chat(chat_id):
+    settings_snapshot = get_settings_snapshot()
+    bot.send_message(chat_id, f"🧪 Đang chụp thử {format_camera_config(settings_snapshot)}...")
+
+    try:
+        result = capture_camera_test_image()
+    except Exception as e:
+        log_error("Chup thu camera that bai", e)
+        bot.send_message(chat_id, f"❌ Không chụp thử được camera: {e}")
+        return
+
+    if not result["ok"]:
+        bot.send_message(chat_id, f"❌ {result['message']}")
+        return
+
+    try:
+        with open(result["path"], "rb") as photo:
+            bot.send_photo(
+                chat_id,
+                photo,
+                caption=f"🧪 {result['message']}"
+            )
+    except Exception as e:
+        log_error("Khong gui duoc anh test camera", e)
+        bot.send_message(chat_id, f"⚠️ Đã chụp thử camera nhưng gửi Telegram thất bại: {e}")
+
+
+def dashboard_scan_cameras():
+    try:
+        return build_camera_scan_message()
+    except Exception as e:
+        log_error("Dashboard quet camera that bai", e)
+        return f"Không quét được camera: {e}"
+
+
+def dashboard_test_camera():
+    try:
+        return capture_camera_test_image()
+    except Exception as e:
+        log_error("Dashboard chup thu camera that bai", e)
+        return {
+            "ok": False,
+            "message": f"Không chụp thử được camera: {e}",
+            "path": "",
+        }
+
 
 def capture_and_analyze_environment(chat_id, question, reply_to_message=None):
     if reply_to_message is None:
@@ -417,6 +527,8 @@ def create_dashboard_context():
         delete_alert_history_entry=delete_alert_history_entry,
         update_setting=update_setting,
         trim_alert_history=trim_alert_history,
+        scan_cameras=dashboard_scan_cameras,
+        test_camera=dashboard_test_camera,
         list_backups=get_recent_backups,
         restore_settings_backup=restore_settings_backup,
         restore_alert_history_backup=restore_alert_history_backup,
@@ -467,6 +579,8 @@ def create_telegram_handler_context():
         format_size=format_size,
         send_alert_history=send_alert_history,
         capture_and_analyze_environment=capture_and_analyze_environment,
+        scan_cameras=scan_cameras_for_chat,
+        test_camera=test_camera_for_chat,
         schedule_bot_restart=schedule_bot_restart,
         tail_error_log=tail_error_log,
         log_error=log_error
