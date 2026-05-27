@@ -156,7 +156,7 @@ Có thể chỉnh setting ở cả Telegram và dashboard. Cả hai đều lưu 
 Dashboard có các tab:
 
 - `Trạng thái`: radar, camera, uptime, logs size, setting hiện tại.
-- `Lịch sử`: xem ảnh/video cảnh báo, lọc hôm nay/có video/không video/mới nhất, xóa từng cảnh báo, tải toàn bộ lịch sử thành file `.zip`.
+- `Lịch sử`: xem ảnh/video cảnh báo theo từng trang 10 cảnh báo, lọc hôm nay/có video/không video/mới nhất, xóa từng cảnh báo, tải toàn bộ lịch sử thành file `.zip`.
 - `Setting`: chỉnh setting trực tiếp trên web.
 - `Backup`: lọc backup theo loại, xem/tải nội dung từng backup, khôi phục hoặc xóa một backup cụ thể.
 - `Log lỗi`: xem lỗi nội bộ gần nhất.

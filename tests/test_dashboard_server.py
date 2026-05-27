@@ -18,11 +18,20 @@ from vision_bot_core.dashboard_server import (
 from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
 
 
-def make_dashboard_context(settings_backup_path="", history_backup_path="", restored=None, deleted=None, log_dir="logs"):
+def make_dashboard_context(
+    settings_backup_path="",
+    history_backup_path="",
+    restored=None,
+    deleted=None,
+    log_dir="logs",
+    history_entries=None,
+):
     if restored is None:
         restored = []
     if deleted is None:
         deleted = []
+    if history_entries is None:
+        history_entries = []
 
     return DashboardContext(
         host="127.0.0.1",
@@ -35,7 +44,7 @@ def make_dashboard_context(settings_backup_path="", history_backup_path="", rest
         history_limit_choices=(10, 50, 100),
         bot_start_time=0,
         get_settings_snapshot=lambda: DEFAULT_SETTINGS.copy(),
-        get_alert_history_snapshot=lambda limit=None: [],
+        get_alert_history_snapshot=lambda limit=None: list(history_entries),
         get_camera_status=lambda: (False, "Camera chưa kiểm tra"),
         is_radar_active=lambda: False,
         format_size=lambda size: f"{size} B",
@@ -223,6 +232,43 @@ class DashboardServerTests(unittest.TestCase):
 
         self.assertIn('/download-history-zip', html)
         self.assertIn("Tải lịch sử .zip", html)
+
+    def test_render_history_tab_paginates_alerts(self):
+        entries = [
+            {"id": f"alert-{index}", "timestamp": index, "analysis": f"record {index:03d}"}
+            for index in range(25)
+        ]
+        html = render_dashboard_html(
+            make_dashboard_context(history_entries=entries),
+            active_tab="history",
+            history_page=2,
+        )
+
+        self.assertIn("Trang 2/3", html)
+        self.assertIn("Đang hiển thị 11-20/25", html)
+        self.assertIn("record 014", html)
+        self.assertIn("record 005", html)
+        self.assertNotIn("record 024", html)
+        self.assertNotIn("record 004", html)
+        self.assertIn("page=1", html)
+        self.assertIn("page=3", html)
+        self.assertIn('name="page" value="2"', html)
+
+    def test_render_history_tab_clamps_page_to_last_page(self):
+        entries = [
+            {"id": f"alert-{index}", "timestamp": index, "analysis": f"record {index:03d}"}
+            for index in range(12)
+        ]
+        html = render_dashboard_html(
+            make_dashboard_context(history_entries=entries),
+            active_tab="history",
+            history_page=99,
+        )
+
+        self.assertIn("Trang 2/2", html)
+        self.assertIn("record 001", html)
+        self.assertIn("record 000", html)
+        self.assertNotIn("record 011", html)
 
     def test_build_dashboard_history_zip_contains_history_files_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:

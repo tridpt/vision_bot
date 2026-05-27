@@ -76,6 +76,7 @@ DASHBOARD_BACKUP_FILTER_KEYS = {key for key, _ in DASHBOARD_BACKUP_FILTERS}
 
 HISTORY_EXPORT_FILENAMES = {"alert_history.json", "bot_errors.log"}
 HISTORY_EXPORT_MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov", ".webm"}
+DASHBOARD_HISTORY_PAGE_SIZE = 10
 
 
 def escape_html(value):
@@ -104,6 +105,14 @@ def normalize_dashboard_backup_filter(backup_filter):
     if backup_filter in DASHBOARD_BACKUP_FILTER_KEYS:
         return backup_filter
     return "all"
+
+
+def normalize_dashboard_page(page):
+    try:
+        page_number = int(page)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, page_number)
 
 
 def dashboard_tab_url(tab, history_filter="all", backup_filter="all"):
@@ -167,6 +176,23 @@ def dashboard_filter_url(history_filter):
     return "/?" + urlencode({"tab": "history", "filter": history_filter})
 
 
+def dashboard_history_page_url(history_filter, page):
+    return "/?" + urlencode({
+        "tab": "history",
+        "filter": normalize_dashboard_history_filter(history_filter),
+        "page": normalize_dashboard_page(page)
+    })
+
+
+def paginate_dashboard_items(items, page, page_size=DASHBOARD_HISTORY_PAGE_SIZE):
+    total_count = len(items)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    current_page = min(normalize_dashboard_page(page), total_pages)
+    start_index = (current_page - 1) * page_size
+    end_index = min(start_index + page_size, total_count)
+    return items[start_index:end_index], current_page, total_pages, start_index, end_index
+
+
 def dashboard_backup_detail_url(filename, backup_filter="all"):
     return "/?" + urlencode({
         "tab": "backups",
@@ -183,7 +209,7 @@ def dashboard_history_zip_url():
     return "/download-history-zip"
 
 
-def render_dashboard_filter_controls(active_filter, shown_count, total_count):
+def render_dashboard_filter_controls(active_filter, filtered_count, total_count, start_index, end_index):
     links = []
     for filter_key, label in DASHBOARD_HISTORY_FILTERS:
         active_class = " active" if filter_key == active_filter else ""
@@ -192,13 +218,38 @@ def render_dashboard_filter_controls(active_filter, shown_count, total_count):
             f"{escape_html(label)}</a>"
         )
 
+    if filtered_count == 0:
+        count_text = f"Đang hiển thị 0/{total_count}"
+    elif filtered_count == total_count:
+        count_text = f"Đang hiển thị {start_index + 1}-{end_index}/{total_count}"
+    else:
+        count_text = f"Đang hiển thị {start_index + 1}-{end_index}/{filtered_count} (lọc từ {total_count})"
+
     return (
         '<div class="filter-bar">'
         '<div class="filter-links">'
         f"{''.join(links)}"
         "</div>"
-        f'<span class="filter-count">Đang hiển thị {shown_count}/{total_count}</span>'
+        f'<span class="filter-count">{escape_html(count_text)}</span>'
         "</div>"
+    )
+
+
+def render_dashboard_history_pagination(active_filter, current_page, total_pages):
+    if total_pages <= 1:
+        return ""
+
+    prev_page = max(1, current_page - 1)
+    next_page = min(total_pages, current_page + 1)
+    prev_class = " disabled" if current_page <= 1 else ""
+    next_class = " disabled" if current_page >= total_pages else ""
+
+    return (
+        '<nav class="pagination" aria-label="Phân trang lịch sử">'
+        f'<a class="page-link{prev_class}" href="{dashboard_history_page_url(active_filter, prev_page)}">Trước</a>'
+        f'<span class="page-current">Trang {current_page}/{total_pages}</span>'
+        f'<a class="page-link{next_class}" href="{dashboard_history_page_url(active_filter, next_page)}">Sau</a>'
+        "</nav>"
     )
 
 
@@ -248,7 +299,7 @@ def render_dashboard_backup_filter_controls(active_filter, shown_count, total_co
     )
 
 
-def render_dashboard_history(ctx, entries, active_filter="all"):
+def render_dashboard_history(ctx, entries, active_filter="all", history_page=1):
     if not entries:
         return '<section class="empty">Chưa có cảnh báo nào.</section>'
 
@@ -268,6 +319,7 @@ def render_dashboard_history(ctx, entries, active_filter="all"):
                 'onsubmit="return confirm(\'Xóa cảnh báo này?\')">'
                 f'<input type="hidden" name="id" value="{escape_html(alert_id)}">'
                 f'<input type="hidden" name="filter" value="{escape_html(active_filter)}">'
+                f'<input type="hidden" name="page" value="{normalize_dashboard_page(history_page)}">'
                 '<button class="delete-button" type="submit">Xóa</button>'
                 '</form>'
             )
@@ -733,21 +785,30 @@ def render_dashboard_html(
     ctx,
     notice="",
     history_filter="all",
+    history_page=1,
     active_tab="status",
     backup_filename="",
     backup_filter="all"
 ):
     active_tab = normalize_dashboard_tab(active_tab)
     history_filter = normalize_dashboard_history_filter(history_filter)
+    history_page = normalize_dashboard_page(history_page)
     backup_filter = normalize_dashboard_backup_filter(backup_filter)
     settings_snapshot = ctx.get_settings_snapshot()
     all_history_entries = ctx.get_alert_history_snapshot(settings_snapshot["alert_history_limit"])
     history_entries = filter_dashboard_history(ctx, all_history_entries, history_filter)
+    visible_history_entries, history_page, total_history_pages, start_index, end_index = paginate_dashboard_items(
+        history_entries,
+        history_page
+    )
     filter_controls = render_dashboard_filter_controls(
         history_filter,
         len(history_entries),
-        len(all_history_entries)
+        len(all_history_entries),
+        start_index,
+        end_index
     )
+    pagination_controls = render_dashboard_history_pagination(history_filter, history_page, total_history_pages)
     camera_ok, camera_status = ctx.get_camera_status()
     radar_status = "BẬT" if ctx.is_radar_active() else "TẮT"
     logs_size = ctx.format_size(ctx.get_directory_size(ctx.log_dir))
@@ -784,7 +845,8 @@ def render_dashboard_html(
       <h2>Lịch sử cảnh báo</h2>
       {render_dashboard_history_actions()}
       {filter_controls}
-      <section class="history">{render_dashboard_history(ctx, history_entries, history_filter)}</section>
+      <section class="history">{render_dashboard_history(ctx, visible_history_entries, history_filter, history_page)}</section>
+      {pagination_controls}
     </section>"""
     settings_content = f"""
     <section class="panel tab-panel">
@@ -886,6 +948,11 @@ def render_dashboard_html(
     .filter-link {{ border: 1px solid var(--line); border-radius: 999px; color: var(--text); padding: 6px 10px; text-decoration: none; }}
     .filter-link.active {{ background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }}
     .filter-count {{ color: var(--muted); }}
+    .pagination {{ display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 16px; }}
+    .page-link, .page-current {{ border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; text-decoration: none; }}
+    .page-link {{ color: var(--accent); font-weight: 700; }}
+    .page-link.disabled {{ color: var(--muted); pointer-events: none; }}
+    .page-current {{ color: var(--muted); }}
     .settings-form input, .settings-form select {{ width: min(260px, 100%); padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); font: inherit; }}
     .setting-hint {{ display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }}
     .setting-note {{ color: var(--muted); margin: 12px 0 0; }}
@@ -1141,6 +1208,7 @@ def make_dashboard_handler(ctx):
                 query = parse_qs(parsed_url.query)
                 active_tab = normalize_dashboard_tab(query.get("tab", ["status"])[0])
                 history_filter = normalize_dashboard_history_filter(query.get("filter", ["all"])[0])
+                history_page = normalize_dashboard_page(query.get("page", ["1"])[0])
                 backup_filter = normalize_dashboard_backup_filter(query.get("backup_filter", ["all"])[0])
                 backup_filename = query.get("backup", [""])[0]
                 notice = ""
@@ -1189,6 +1257,7 @@ def make_dashboard_handler(ctx):
                     ctx,
                     notice,
                     history_filter,
+                    history_page,
                     active_tab,
                     backup_filename,
                     backup_filter
@@ -1306,12 +1375,14 @@ def make_dashboard_handler(ctx):
 
             alert_id = form.get("id", [""])[0]
             history_filter = normalize_dashboard_history_filter(form.get("filter", ["all"])[0])
+            history_page = normalize_dashboard_page(form.get("page", ["1"])[0])
             deleted = ctx.delete_alert_history_entry(alert_id)
             redirect_dashboard(
                 self,
                 "/?" + urlencode({
                     "tab": "history",
                     "filter": history_filter,
+                    "page": history_page,
                     "deleted": "1" if deleted else "0"
                 })
             )
