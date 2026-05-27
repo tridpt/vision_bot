@@ -170,6 +170,10 @@ def dashboard_backup_detail_url(filename, backup_filter="all"):
     })
 
 
+def dashboard_backup_download_url(filename):
+    return "/download-backup?" + urlencode({"filename": filename})
+
+
 def render_dashboard_filter_controls(active_filter, shown_count, total_count):
     links = []
     for filter_key, label in DASHBOARD_HISTORY_FILTERS:
@@ -386,6 +390,21 @@ def load_dashboard_backup_json(ctx, backup):
         return None, "Không đọc được nội dung backup. Xem tab Log lỗi để biết chi tiết."
 
 
+def get_dashboard_backup_file(ctx, filename):
+    backup = find_dashboard_backup(ctx.list_backups(limit=20), filename)
+    if backup is None:
+        return None
+
+    backup_path = backup.get("path")
+    if not backup_path or not os.path.isfile(backup_path):
+        return None
+    if os.path.basename(os.path.abspath(backup_path)) != backup.get("filename"):
+        return None
+    if not str(backup.get("filename", "")).endswith(".json"):
+        return None
+    return backup
+
+
 def render_settings_backup_detail(ctx, data):
     if not isinstance(data, dict):
         return '<p class="empty">Backup setting không đúng định dạng.</p>'
@@ -590,6 +609,16 @@ def render_selected_backup_delete_form(backup, active_filter="all"):
     )
 
 
+def render_selected_backup_download_link(backup):
+    filename = backup.get("filename", "")
+    if not filename:
+        return ""
+    return (
+        f'<a class="media-link" href="{dashboard_backup_download_url(filename)}">'
+        "Tải xuống</a>"
+    )
+
+
 def render_dashboard_backups(ctx, backups, selected_filename="", active_filter="all"):
     actions = render_dashboard_backup_actions()
     filtered_backups = filter_dashboard_backups(backups, active_filter)
@@ -621,6 +650,7 @@ def render_dashboard_backups(ctx, backups, selected_filename="", active_filter="
         )
         restore_form = render_selected_backup_restore_form(backup, active_filter)
         delete_form = render_selected_backup_delete_form(backup, active_filter)
+        download_link = render_selected_backup_download_link(backup)
         rows.append(
             "<tr>"
             f"<td>{escape_html(backup_label_text(backup.get('label', 'unknown')))}</td>"
@@ -629,6 +659,7 @@ def render_dashboard_backups(ctx, backups, selected_filename="", active_filter="
             f"<td>{escape_html(ctx.format_size(backup.get('size', 0)))}</td>"
             f"<td><code>{escape_html(filename)}</code></td>"
             f"<td>{detail_link}</td>"
+            f"<td>{download_link}</td>"
             f"<td>{restore_form}</td>"
             f"<td>{delete_form}</td>"
             "</tr>"
@@ -641,7 +672,7 @@ def render_dashboard_backups(ctx, backups, selected_filename="", active_filter="
         '<p class="setting-note">Backup chỉ lưu file JSON cấu hình/lịch sử. Ảnh và video cảnh báo không được copy vào backup.</p>'
         '<div class="table-scroll">'
         "<table>"
-        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th><th>Nội dung</th><th>Khôi phục</th><th>Xóa</th></tr></thead>"
+        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th><th>Nội dung</th><th>Tải</th><th>Khôi phục</th><th>Xóa</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         "</table>"
         "</div>"
@@ -970,6 +1001,32 @@ def serve_dashboard_media(ctx, handler, query):
         handler.send_error(404)
 
 
+def serve_dashboard_backup_download(ctx, handler, query):
+    filename = query.get("filename", [""])[0]
+    backup = get_dashboard_backup_file(ctx, filename)
+    if backup is None:
+        handler.send_error(404)
+        return
+
+    absolute_path = os.path.abspath(backup["path"])
+    try:
+        with open(absolute_path, "rb") as file:
+            content = file.read()
+    except OSError as e:
+        ctx.log_error(f"Dashboard khong tai duoc backup: {absolute_path}", e)
+        handler.send_error(404)
+        return
+
+    safe_filename = os.path.basename(backup["filename"])
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Disposition", f'attachment; filename="{safe_filename}"')
+    handler.send_header("Content-Length", str(len(content)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(content)
+
+
 def redirect_dashboard(handler, location):
     handler.send_response(303)
     handler.send_header("Location", location)
@@ -1048,6 +1105,10 @@ def make_dashboard_handler(ctx):
 
             if parsed_url.path == "/media":
                 serve_dashboard_media(ctx, self, parse_qs(parsed_url.query))
+                return
+
+            if parsed_url.path == "/download-backup":
+                serve_dashboard_backup_download(ctx, self, parse_qs(parsed_url.query))
                 return
 
             self.send_error(404)

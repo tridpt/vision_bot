@@ -6,6 +6,7 @@ from pathlib import Path
 from vision_bot_core.dashboard_server import (
     DashboardContext,
     delete_selected_dashboard_backup,
+    get_dashboard_backup_file,
     normalize_dashboard_tab,
     render_dashboard_html,
     restore_selected_dashboard_backup,
@@ -90,7 +91,9 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('/restore-history-backup', html)
         self.assertIn('/restore-selected-backup', html)
         self.assertIn('/delete-backup', html)
+        self.assertIn('/download-backup', html)
         self.assertIn("Xem nội dung", html)
+        self.assertIn("Tải xuống", html)
         self.assertIn("Khôi phục file này", html)
         self.assertIn("Đang hiển thị 2/2", html)
 
@@ -198,6 +201,18 @@ class DashboardServerTests(unittest.TestCase):
 
         self.assertFalse(delete_selected_dashboard_backup(ctx, "missing.json"))
         self.assertEqual(deleted, [])
+
+    def test_get_dashboard_backup_file_returns_only_known_existing_backup(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backup_path = Path(temp_dir) / "settings_before_setting.json"
+            backup_path.write_text("{}", encoding="utf-8")
+            ctx = make_dashboard_context(settings_backup_path=str(backup_path))
+
+            backup = get_dashboard_backup_file(ctx, "settings_before_setting.json")
+
+            self.assertIsNotNone(backup)
+            self.assertEqual(backup["path"], str(backup_path))
+            self.assertIsNone(get_dashboard_backup_file(ctx, "missing.json"))
 
 
 if __name__ == "__main__":
