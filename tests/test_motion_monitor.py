@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from vision_bot_core.motion_monitor import (
     MotionMonitor,
@@ -81,6 +82,28 @@ class MotionMonitorTests(unittest.TestCase):
         self.assertIsNone(active_camera_config)
         self.assertIsNone(last_gray_frame)
         self.assertEqual(monitor.get_camera_status(), (False, "Camera vừa rớt"))
+
+    def test_register_camera_failure_alerts_on_first_failure(self):
+        monitor = self.make_monitor()
+
+        failure_count, should_alert, repeated_alert = monitor._register_camera_failure("Camera rớt")
+
+        self.assertEqual(failure_count, 1)
+        self.assertTrue(should_alert)
+        self.assertFalse(repeated_alert)
+        self.assertEqual(monitor.get_camera_status(), (False, "Camera rớt"))
+
+    def test_register_camera_failure_reminds_after_threshold(self):
+        monitor = self.make_monitor()
+        monitor._camera_failure_count = 4
+        monitor._last_camera_issue_alert_time = 100
+
+        with patch("vision_bot_core.motion_monitor.time.time", return_value=320):
+            failure_count, should_alert, repeated_alert = monitor._register_camera_failure("Camera vẫn rớt")
+
+        self.assertEqual(failure_count, 5)
+        self.assertTrue(should_alert)
+        self.assertTrue(repeated_alert)
 
 
 if __name__ == "__main__":

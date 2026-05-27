@@ -38,6 +38,10 @@ def parse_person_filter_result(text):
     return "PERSON" in normalized
 
 
+CAMERA_RECONNECT_ALERT_FAILURE_THRESHOLD = 5
+CAMERA_RECONNECT_ALERT_REPEAT_SECONDS = 120
+
+
 @dataclass
 class MotionMonitorContext:
     bot: object
@@ -61,6 +65,8 @@ class MotionMonitor:
         self._camera_online = False
         self._last_camera_status = "Chưa kiểm tra camera"
         self._last_alert_timestamp = None
+        self._camera_failure_count = 0
+        self._last_camera_issue_alert_time = 0
         self._thread = None
 
     def start(self):
@@ -115,6 +121,56 @@ class MotionMonitor:
         with self._lock:
             self._last_alert_timestamp = timestamp
 
+    def _clear_camera_failure_state(self):
+        with self._lock:
+            self._camera_failure_count = 0
+            self._last_camera_issue_alert_time = 0
+
+    def _register_camera_failure(self, status):
+        now = time.time()
+        with self._lock:
+            self._camera_online = False
+            self._last_camera_status = status
+            self._camera_failure_count += 1
+            failure_count = self._camera_failure_count
+            should_alert = failure_count == 1 or (
+                failure_count >= CAMERA_RECONNECT_ALERT_FAILURE_THRESHOLD
+                and now - self._last_camera_issue_alert_time >= CAMERA_RECONNECT_ALERT_REPEAT_SECONDS
+            )
+            repeated_alert = failure_count > 1
+            if should_alert:
+                self._last_camera_issue_alert_time = now
+            return failure_count, should_alert, repeated_alert
+
+    def _build_camera_issue_alert_message(self, status, camera_config, failure_count, repeated_alert=False):
+        camera_text = format_camera_config(camera_config)
+        if repeated_alert:
+            return (
+                "⚠️ CAMERA VẪN CHƯA KẾT NỐI LẠI\n\n"
+                f"{status}\n"
+                f"Đã thử reconnect {failure_count} lần với {camera_text}.\n"
+                "Bot sẽ tiếp tục thử lại."
+            )
+        return (
+            "⚠️ CAMERA BỊ RỚT\n\n"
+            f"{status}\n"
+            f"Bot sẽ tự reconnect {camera_text}."
+        )
+
+    def _send_camera_issue_alert(self, monitoring_chat_id, status, camera_config, failure_count, repeated_alert=False):
+        try:
+            self.ctx.bot.send_message(
+                monitoring_chat_id,
+                self._build_camera_issue_alert_message(
+                    status,
+                    camera_config,
+                    failure_count,
+                    repeated_alert=repeated_alert
+                )
+            )
+        except Exception as e:
+            self.ctx.log_error("Khong gui duoc canh bao camera", e)
+
     def _reset_camera_connection(self, camera_stream, status):
         if camera_stream is not None:
             try:
@@ -139,6 +195,7 @@ class MotionMonitor:
                         camera_stream,
                         "Camera đang nghỉ vì radar tắt"
                     )
+                    self._clear_camera_failure_state()
                     time.sleep(1)
                     continue
 
@@ -148,38 +205,69 @@ class MotionMonitor:
                         camera_stream,
                         "Đang áp dụng cấu hình camera mới"
                     )
+                    self._clear_camera_failure_state()
 
                 if camera_stream is None:
-                    camera_stream = open_camera(camera_config=camera_config)
-                    active_camera_config = camera_config
-                    time.sleep(1.5)
-                    if not camera_stream.isOpened():
+                    try:
+                        camera_stream = open_camera(camera_config=camera_config)
+                        active_camera_config = camera_config
+                        time.sleep(1.5)
+                        if not camera_stream.isOpened():
+                            raise RuntimeError(
+                                f"Radar bật nhưng không mở được {format_camera_config(camera_config)}"
+                            )
+                        warm_up_camera(camera_stream, delay_seconds=0, buffer_reads=5)
+                    except Exception as e:
                         status = f"Radar bật nhưng không mở được {format_camera_config(camera_config)}"
                         camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
                             camera_stream,
                             status
                         )
+                        failure_count, should_alert, repeated_alert = self._register_camera_failure(status)
+                        if should_alert:
+                            self._send_camera_issue_alert(
+                                monitoring_chat_id,
+                                status,
+                                camera_config,
+                                failure_count,
+                                repeated_alert=repeated_alert
+                            )
                         if time.time() - last_camera_error_log_time > 60:
-                            self.ctx.log_error(status)
+                            self.ctx.log_error(status, e)
                             last_camera_error_log_time = time.time()
                         time.sleep(2)
                         continue
-                    warm_up_camera(camera_stream, delay_seconds=0, buffer_reads=5)
 
-                success, img = camera_stream.read()
+                try:
+                    success, img = camera_stream.read()
+                except Exception as e:
+                    success = False
+                    read_error = e
+                else:
+                    read_error = None
                 if not success:
                     status = f"Radar bật nhưng không đọc được ảnh từ {format_camera_config(active_camera_config)}"
                     camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
                         camera_stream,
                         status
                     )
+                    failure_count, should_alert, repeated_alert = self._register_camera_failure(status)
+                    if should_alert:
+                        self._send_camera_issue_alert(
+                            monitoring_chat_id,
+                            status,
+                            active_camera_config or camera_config,
+                            failure_count,
+                            repeated_alert=repeated_alert
+                        )
                     if time.time() - last_camera_error_log_time > 60:
-                        self.ctx.log_error(status)
+                        self.ctx.log_error(status, read_error)
                         last_camera_error_log_time = time.time()
                     time.sleep(1)
                     continue
                 img = transform_camera_frame(img, active_camera_config)
                 self._set_camera_status(True, f"Camera đang mở bởi radar ({format_camera_config(active_camera_config)})")
+                self._clear_camera_failure_state()
 
                 if time.time() - last_alert_time < self.ctx.get_setting("alert_cooldown_seconds"):
                     last_gray_frame = build_motion_gray(img)
