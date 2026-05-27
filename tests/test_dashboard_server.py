@@ -7,11 +7,15 @@ from vision_bot_core.dashboard_server import (
     DashboardContext,
     normalize_dashboard_tab,
     render_dashboard_html,
+    restore_selected_dashboard_backup,
 )
 from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
 
 
-def make_dashboard_context(settings_backup_path="", history_backup_path=""):
+def make_dashboard_context(settings_backup_path="", history_backup_path="", restored=None):
+    if restored is None:
+        restored = []
+
     return DashboardContext(
         host="127.0.0.1",
         port=8765,
@@ -56,6 +60,11 @@ def make_dashboard_context(settings_backup_path="", history_backup_path=""):
                 "path": history_backup_path,
             },
         ],
+        restore_settings_backup=lambda backup: restored.append(("settings", backup)) or {"backup": backup},
+        restore_alert_history_backup=lambda backup: restored.append(("history", backup)) or {
+            "backup": backup,
+            "restored_count": 2,
+        },
         restore_latest_settings_backup=lambda: None,
         restore_latest_alert_history_backup=lambda: None,
         clamp_int=lambda value, default, min_value, max_value: default,
@@ -75,7 +84,9 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("alert_history_before_clear_history.json", html)
         self.assertIn('/restore-settings-backup', html)
         self.assertIn('/restore-history-backup', html)
+        self.assertIn('/restore-selected-backup', html)
         self.assertIn("Xem nội dung", html)
+        self.assertIn("Khôi phục file này", html)
 
     def test_render_settings_backup_detail_shows_setting_values(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -115,6 +126,33 @@ class DashboardServerTests(unittest.TestCase):
             self.assertIn("2", html)
             self.assertIn("motion one", html)
             self.assertIn("time-2.0", html)
+
+    def test_restore_selected_dashboard_backup_uses_selected_file(self):
+        restored = []
+        ctx = make_dashboard_context(restored=restored)
+
+        result = restore_selected_dashboard_backup(ctx, "settings_before_setting.json")
+
+        self.assertEqual(result["status"], "1")
+        self.assertEqual(result["kind"], "settings")
+        self.assertEqual(restored[0][0], "settings")
+        self.assertEqual(restored[0][1]["filename"], "settings_before_setting.json")
+
+    def test_restore_selected_dashboard_backup_restores_history_file(self):
+        restored = []
+        ctx = make_dashboard_context(restored=restored)
+
+        result = restore_selected_dashboard_backup(ctx, "alert_history_before_clear_history.json")
+
+        self.assertEqual(result["status"], "1")
+        self.assertEqual(result["kind"], "history")
+        self.assertEqual(result["count"], "2")
+        self.assertEqual(restored[0][0], "history")
+
+    def test_restore_selected_dashboard_backup_rejects_unknown_file(self):
+        result = restore_selected_dashboard_backup(make_dashboard_context(), "missing.json")
+
+        self.assertEqual(result["status"], "0")
 
 
 if __name__ == "__main__":

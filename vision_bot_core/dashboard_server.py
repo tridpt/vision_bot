@@ -37,6 +37,8 @@ class DashboardContext:
     update_setting: object
     trim_alert_history: object
     list_backups: object
+    restore_settings_backup: object
+    restore_alert_history_backup: object
     restore_latest_settings_backup: object
     restore_latest_alert_history_backup: object
     clamp_int: object
@@ -409,6 +411,39 @@ def render_generic_backup_detail(data):
     return f"<pre>{escape_html(compact)}</pre>"
 
 
+def restore_selected_dashboard_backup(ctx, filename):
+    backup = find_dashboard_backup(ctx.list_backups(limit=20), filename)
+    if backup is None:
+        return {
+            "status": "0",
+            "kind": "unknown",
+            "count": "0",
+        }
+
+    label = backup.get("label")
+    if label == "settings":
+        ctx.restore_settings_backup(backup)
+        return {
+            "status": "1",
+            "kind": "settings",
+            "count": "0",
+        }
+
+    if label == "alert_history":
+        restored = ctx.restore_alert_history_backup(backup)
+        return {
+            "status": "1",
+            "kind": "history",
+            "count": str(restored.get("restored_count", 0)),
+        }
+
+    return {
+        "status": "unsupported",
+        "kind": str(label or "unknown"),
+        "count": "0",
+    }
+
+
 def render_dashboard_backup_detail(ctx, backups, selected_filename):
     if not selected_filename:
         return ""
@@ -453,6 +488,23 @@ def render_dashboard_backup_actions():
     """
 
 
+def render_selected_backup_restore_form(backup):
+    filename = backup.get("filename", "")
+    label = backup.get("label")
+    if not filename or label not in ("settings", "alert_history"):
+        return ""
+
+    button_label = "Khôi phục file này"
+    confirm_text = "Khôi phục backup này? Trạng thái hiện tại sẽ được backup trước khi ghi đè."
+    return (
+        '<form class="inline-form" method="post" action="/restore-selected-backup" '
+        f'onsubmit="return confirm(\'{escape_html(confirm_text)}\')">'
+        f'<input type="hidden" name="filename" value="{escape_html(filename)}">'
+        f'<button class="table-action-button" type="submit">{escape_html(button_label)}</button>'
+        "</form>"
+    )
+
+
 def render_dashboard_backups(ctx, backups, selected_filename=""):
     actions = render_dashboard_backup_actions()
     if not backups:
@@ -469,6 +521,7 @@ def render_dashboard_backups(ctx, backups, selected_filename=""):
             f'<a class="media-link" href="{dashboard_backup_detail_url(filename)}">Xem nội dung</a>'
             if filename else ""
         )
+        restore_form = render_selected_backup_restore_form(backup)
         rows.append(
             "<tr>"
             f"<td>{escape_html(backup_label_text(backup.get('label', 'unknown')))}</td>"
@@ -477,6 +530,7 @@ def render_dashboard_backups(ctx, backups, selected_filename=""):
             f"<td>{escape_html(ctx.format_size(backup.get('size', 0)))}</td>"
             f"<td><code>{escape_html(filename)}</code></td>"
             f"<td>{detail_link}</td>"
+            f"<td>{restore_form}</td>"
             "</tr>"
         )
 
@@ -486,7 +540,7 @@ def render_dashboard_backups(ctx, backups, selected_filename=""):
         '<p class="setting-note">Backup chỉ lưu file JSON cấu hình/lịch sử. Ảnh và video cảnh báo không được copy vào backup.</p>'
         '<div class="table-scroll">'
         "<table>"
-        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th><th>Nội dung</th></tr></thead>"
+        "<thead><tr><th>Loại</th><th>Lý do</th><th>Thời gian</th><th>Dung lượng</th><th>File</th><th>Nội dung</th><th>Khôi phục</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         "</table>"
         "</div>"
@@ -686,6 +740,8 @@ def render_dashboard_html(ctx, notice="", history_filter="all", active_tab="stat
     .backup-summary p {{ margin: 0 0 8px; }}
     .table-scroll {{ overflow-x: auto; }}
     code {{ font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }}
+    .inline-form {{ margin: 0; }}
+    .table-action-button {{ border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-weight: 700; padding: 5px 9px; white-space: nowrap; }}
     .delete-form {{ margin: 0; }}
     .delete-button {{ border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--bad); cursor: pointer; font: inherit; font-weight: 700; padding: 5px 9px; }}
     .delete-button:hover {{ border-color: var(--bad); }}
@@ -842,6 +898,21 @@ def make_dashboard_handler(ctx):
                     notice = "Chưa có backup lịch sử để khôi phục."
                 elif query.get("restore_history") == ["error"]:
                     notice = "Không thể khôi phục lịch sử. Xem tab Log lỗi để biết chi tiết."
+                elif query.get("restore_selected") == ["1"]:
+                    kind = query.get("kind", ["unknown"])[0]
+                    if kind == "settings":
+                        notice = "Đã khôi phục setting từ backup đã chọn."
+                    elif kind == "history":
+                        count = query.get("count", ["0"])[0]
+                        notice = f"Đã khôi phục {count} cảnh báo từ backup lịch sử đã chọn."
+                    else:
+                        notice = "Đã khôi phục backup đã chọn."
+                elif query.get("restore_selected") == ["0"]:
+                    notice = "Không tìm thấy backup đã chọn trong danh sách hiện tại."
+                elif query.get("restore_selected") == ["unsupported"]:
+                    notice = "Loại backup này chưa hỗ trợ khôi phục từ dashboard."
+                elif query.get("restore_selected") == ["error"]:
+                    notice = "Không thể khôi phục backup đã chọn. Xem tab Log lỗi để biết chi tiết."
 
                 body = render_dashboard_html(
                     ctx,
@@ -902,6 +973,29 @@ def make_dashboard_handler(ctx):
                 redirect_dashboard(
                     self,
                     "/?" + urlencode({"tab": "backups", "restore_history": status, "count": count})
+                )
+                return
+
+            if parsed_url.path == "/restore-selected-backup":
+                filename = form.get("filename", [""])[0]
+                try:
+                    restored = restore_selected_dashboard_backup(ctx, filename)
+                except Exception as e:
+                    ctx.log_error("Dashboard khoi phuc backup da chon that bai", e)
+                    restored = {
+                        "status": "error",
+                        "kind": "unknown",
+                        "count": "0",
+                    }
+                redirect_dashboard(
+                    self,
+                    "/?" + urlencode({
+                        "tab": "backups",
+                        "backup": filename,
+                        "restore_selected": restored["status"],
+                        "kind": restored["kind"],
+                        "count": restored["count"],
+                    })
                 )
                 return
 

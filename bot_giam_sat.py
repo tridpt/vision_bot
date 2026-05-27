@@ -172,10 +172,13 @@ def restore_latest_settings_backup():
     if latest_backup is None:
         return None
 
+    return restore_settings_backup(latest_backup)
+
+def restore_settings_backup(backup):
     backup_runtime_state("before_restore_settings", include_settings=True, include_history=False)
-    restored_settings = restore_settings_from_file(latest_backup["path"])
+    restored_settings = restore_settings_from_file(backup["path"])
     return {
-        "backup": latest_backup,
+        "backup": backup,
         "settings": restored_settings,
     }
 
@@ -184,12 +187,15 @@ def restore_latest_alert_history_backup():
     if latest_backup is None:
         return None
 
+    return restore_alert_history_backup(latest_backup)
+
+def restore_alert_history_backup(backup):
     history_limit = get_setting("alert_history_limit")
-    restored_history = load_alert_history_from_file(latest_backup["path"], limit=history_limit)
+    restored_history = load_alert_history_from_file(backup["path"], limit=history_limit)
     backup_runtime_state("before_restore_history", include_settings=False, include_history=True)
     restored_history = restore_alert_history(restored_history)
     return {
-        "backup": latest_backup,
+        "backup": backup,
         "restored_count": len(restored_history),
         "history_limit": history_limit,
     }
@@ -385,6 +391,8 @@ def create_dashboard_context():
         update_setting=update_setting,
         trim_alert_history=trim_alert_history,
         list_backups=get_recent_backups,
+        restore_settings_backup=restore_settings_backup,
+        restore_alert_history_backup=restore_alert_history_backup,
         restore_latest_settings_backup=restore_latest_settings_backup,
         restore_latest_alert_history_backup=restore_latest_alert_history_backup,
         clamp_int=clamp_int,
