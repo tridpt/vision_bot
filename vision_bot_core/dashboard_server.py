@@ -52,6 +52,10 @@ class DashboardContext:
     clamp_int: object
     log_error: object
     is_bot_running: object = None
+    add_live_viewer: object = None
+    remove_live_viewer: object = None
+    get_latest_frame: object = None
+    dashboard_password: str = None
 
 
 DASHBOARD_TABS = (
@@ -113,6 +117,205 @@ def normalize_dashboard_backup_filter(backup_filter):
     if backup_filter in DASHBOARD_BACKUP_FILTER_KEYS:
         return backup_filter
     return "all"
+
+
+def get_dashboard_cookie(handler, name):
+    cookie_header = handler.headers.get("Cookie")
+    if not cookie_header:
+        return None
+    for cookie in cookie_header.split(";"):
+        parts = cookie.strip().split("=", 1)
+        if len(parts) == 2 and parts[0] == name:
+            return parts[1]
+    return None
+
+
+def render_login_page(error_message=""):
+    error_html = ""
+    if error_message:
+        error_html = f'<div class="error-msg">{escape_html(error_message)}</div>'
+
+    body = f"""<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vision Bot - Đăng nhập</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {{
+      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      --glass-bg: rgba(30, 41, 59, 0.45);
+      --glass-border: rgba(255, 255, 255, 0.08);
+      --glass-shadow: rgba(0, 0, 0, 0.3);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-glow: rgba(99, 102, 241, 0.3);
+      --error: #ef4444;
+      --error-bg: rgba(239, 68, 68, 0.15);
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }}
+    .login-container {{
+      width: 100%;
+      max-width: 420px;
+      perspective: 1000px;
+    }}
+    .login-card {{
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 40px 32px;
+      box-shadow: 0 20px 40px var(--glass-shadow);
+      text-align: center;
+      animation: cardEntrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }}
+    @keyframes cardEntrance {{
+      from {{ opacity: 0; transform: translateY(30px); }}
+      to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    .logo-container {{
+      margin-bottom: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 64px;
+      height: 64px;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 16px;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }}
+    .logo-icon {{
+      font-size: 32px;
+    }}
+    h1 {{
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(to right, #f8fafc, #cbd5e1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }}
+    .subtitle {{
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 32px;
+    }}
+    .form-group {{
+      margin-bottom: 20px;
+      text-align: left;
+    }}
+    label {{
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }}
+    .input-wrapper {{
+      position: relative;
+    }}
+    input {{
+      width: 100%;
+      padding: 14px 16px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      color: var(--text);
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.3s ease;
+    }}
+    input:focus {{
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+      background: rgba(15, 23, 42, 0.8);
+    }}
+    .error-msg {{
+      background: var(--error-bg);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-bottom: 24px;
+      text-align: left;
+      animation: shake 0.4s ease-in-out;
+    }}
+    @keyframes shake {{
+      0%, 100% {{ transform: translateX(0); }}
+      25% {{ transform: translateX(-6px); }}
+      75% {{ transform: translateX(6px); }}
+    }}
+    button {{
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      border: none;
+      border-radius: 12px;
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 12px var(--accent-glow);
+      transition: all 0.3s ease;
+      margin-top: 8px;
+    }}
+    button:hover {{
+      background: var(--accent-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+    }}
+    button:active {{
+      transform: translateY(0);
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }}
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-card">
+      <div class="logo-container">
+        <span class="logo-icon">🤖</span>
+      </div>
+      <h1>Vision Bot Dashboard</h1>
+      <p class="subtitle">Nhập mật khẩu truy cập hệ thống giám sát</p>
+      
+      {error_html}
+      
+      <form method="post" action="/login">
+        <div class="form-group">
+          <label for="password">Mật khẩu</label>
+          <div class="input-wrapper">
+            <input type="password" id="password" name="password" placeholder="Nhập mật khẩu..." required autofocus>
+          </div>
+        </div>
+        <button type="submit">Đăng nhập</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>"""
+    return body.encode("utf-8")
 
 
 def normalize_dashboard_page(page):
@@ -950,6 +1153,18 @@ def render_dashboard_html(
     if notice:
         notice_html = f'<section class="notice">{escape_html(notice)}</section>'
 
+    refresh_meta = '<meta http-equiv="refresh" content="30">' if active_tab != "status" else ""
+    live_stream_html = ""
+    if ctx.get_latest_frame is not None:
+        live_stream_html = """
+        <section class="panel tab-panel" style="margin-top: 16px;">
+          <h2>Camera Live Stream</h2>
+          <div style="text-align: center; background: #000; border-radius: 6px; padding: 10px;">
+            <img src="/live-stream" alt="Live Camera Stream" style="max-height: 480px; width: auto; max-width: 100%; border: none;">
+          </div>
+        </section>
+        """
+
     camera_class = "ok" if camera_ok else "bad"
     tabs_html = render_dashboard_tabs(active_tab, history_filter, backup_filter)
     status_content = f"""
@@ -961,6 +1176,8 @@ def render_dashboard_html(
       <div class="card"><span>Tóm tắt hằng ngày</span><strong>{escape_html(daily_summary_text)}</strong></div>
       <div class="card"><span>Logs</span><strong>{escape_html(logs_size)}</strong></div>
     </section>
+
+    {live_stream_html}
 
     <section class="panel tab-panel">
       <h2>Sức khỏe hệ thống</h2>
@@ -1011,7 +1228,7 @@ def render_dashboard_html(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="30">
+  {refresh_meta}
   <title>Vision Bot Dashboard</title>
   <style>
     :root {{
@@ -1408,8 +1625,44 @@ def serve_dashboard_camera_test(ctx, handler):
 
 def make_dashboard_handler(ctx):
     class DashboardRequestHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def check_auth(self):
+            if not ctx.dashboard_password:
+                return True
             parsed_url = urlparse(self.path)
+            if parsed_url.path == "/login":
+                return True
+            
+            session_cookie = get_dashboard_cookie(self, "session")
+            if session_cookie == "authorized":
+                return True
+                
+            if parsed_url.path in ("/live-stream", "/media", "/download-backup", "/download-history-zip"):
+                self.send_response(401)
+                self.end_headers()
+                self.wfile.write(b"Unauthorized")
+                return False
+
+            redirect_dashboard(self, "/login")
+            return False
+
+        def do_GET(self):
+            if not self.check_auth():
+                return
+            parsed_url = urlparse(self.path)
+            if parsed_url.path == "/login":
+                session_cookie = get_dashboard_cookie(self, "session")
+                if ctx.dashboard_password and session_cookie == "authorized":
+                    redirect_dashboard(self, "/")
+                    return
+                body = render_login_page()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
             if parsed_url.path in ("/", "/index.html"):
                 query = parse_qs(parsed_url.query)
                 active_tab = normalize_dashboard_tab(query.get("tab", ["status"])[0])
@@ -1476,6 +1729,44 @@ def make_dashboard_handler(ctx):
                 self.wfile.write(body)
                 return
 
+            if parsed_url.path == "/live-stream":
+                if ctx.add_live_viewer is None or ctx.get_latest_frame is None or ctx.remove_live_viewer is None:
+                    self.send_error(501, "Live stream not supported")
+                    return
+                ctx.add_live_viewer()
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, pre-check=0, post-check=0, max-age=0")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+
+                    import cv2
+                    while True:
+                        frame = ctx.get_latest_frame()
+                        if frame is not None:
+                            success, jpeg = cv2.imencode('.jpg', frame)
+                            if success:
+                                jpeg_bytes = jpeg.tobytes()
+                                self.wfile.write(b"--frame\r\n")
+                                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                                self.wfile.write(f"Content-Length: {len(jpeg_bytes)}\r\n\r\n".encode("ascii"))
+                                self.wfile.write(jpeg_bytes)
+                                self.wfile.write(b"\r\n")
+                                time.sleep(0.05)
+                            else:
+                                time.sleep(0.1)
+                        else:
+                            time.sleep(0.1)
+                except (ConnectionError, TimeoutError, BrokenPipeError):
+                    pass
+                except Exception as e:
+                    ctx.log_error("Loi trong luong live stream dashboard", e)
+                finally:
+                    ctx.remove_live_viewer()
+                return
+
             if parsed_url.path == "/media":
                 serve_dashboard_media(ctx, self, parse_qs(parsed_url.query))
                 return
@@ -1499,6 +1790,8 @@ def make_dashboard_handler(ctx):
             self.send_error(404)
 
         def do_POST(self):
+            if not self.check_auth():
+                return
             parsed_url = urlparse(self.path)
             try:
                 content_length = int(self.headers.get("Content-Length", "0"))
@@ -1507,6 +1800,25 @@ def make_dashboard_handler(ctx):
 
             body = self.rfile.read(min(content_length, 4096)).decode("utf-8", errors="replace")
             form = parse_qs(body)
+
+            if parsed_url.path == "/login":
+                password = form.get("password", [""])[0]
+                if password == ctx.dashboard_password:
+                    self.send_response(303)
+                    self.send_header("Location", "/")
+                    self.send_header("Set-Cookie", "session=authorized; Path=/; HttpOnly; SameSite=Lax")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    body = render_login_page("Mật khẩu không chính xác!")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(body)
+                return
 
             if parsed_url.path == "/update-settings":
                 update_dashboard_settings(ctx, form)

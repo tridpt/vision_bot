@@ -100,6 +100,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHIEC_CHIA_KHOA_ID_CUA_BAN = int(os.getenv("ALLOWED_USER_ID", 0))
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 
 def env_int(name, default):
     try:
@@ -550,7 +551,11 @@ def create_dashboard_context():
         restore_latest_alert_history_backup=restore_latest_alert_history_backup,
         delete_backup=delete_backup,
         clamp_int=clamp_int,
-        log_error=log_error
+        log_error=log_error,
+        add_live_viewer=motion_monitor.add_live_viewer,
+        remove_live_viewer=motion_monitor.remove_live_viewer,
+        get_latest_frame=motion_monitor.get_latest_frame,
+        dashboard_password=DASHBOARD_PASSWORD
     )
 
 def send_startup_notification():

@@ -15,6 +15,7 @@ from vision_bot_core.dashboard_server import (
     render_dashboard_html,
     restore_selected_dashboard_backup,
     update_dashboard_settings,
+    make_dashboard_handler,
 )
 from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
 
@@ -394,6 +395,50 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(export_names, expected_names)
         self.assertEqual(zip_names, expected_names)
         self.assertEqual(written_count, len(expected_names))
+
+    def test_dashboard_cookie_auth_required_when_password_set(self):
+        ctx = make_dashboard_context()
+        ctx.dashboard_password = "testpassword"
+        
+        handler_class = make_dashboard_handler(ctx)
+        
+        class TestHandler(handler_class):
+            def __init__(self):
+                self.headers = {}
+                self.path = "/"
+                import io
+                self.wfile = io.BytesIO()
+                self.responses = []
+                self.headers_sent = {}
+            def send_response(self, code, message=None):
+                self.responses.append(code)
+            def send_header(self, name, val):
+                self.headers_sent[name] = val
+            def end_headers(self):
+                pass
+        
+        ctx.dashboard_password = ""
+        handler = TestHandler()
+        self.assertTrue(handler.check_auth())
+        
+        ctx.dashboard_password = "testpassword"
+        handler = TestHandler()
+        self.assertFalse(handler.check_auth())
+        self.assertEqual(handler.responses, [303])
+        self.assertEqual(handler.headers_sent.get("Location"), "/login")
+        
+        handler = TestHandler()
+        handler.headers = {"Cookie": "session=wrong"}
+        self.assertFalse(handler.check_auth())
+        self.assertEqual(handler.responses, [303])
+        
+        handler = TestHandler()
+        handler.headers = {"Cookie": "session=authorized"}
+        self.assertTrue(handler.check_auth())
+
+        handler = TestHandler()
+        handler.path = "/login"
+        self.assertTrue(handler.check_auth())
 
 
 if __name__ == "__main__":

@@ -69,6 +69,28 @@ class MotionMonitor:
         self._camera_failure_count = 0
         self._last_camera_issue_alert_time = 0
         self._thread = None
+        self._live_viewers = 0
+        self._last_frame = None
+
+    def add_live_viewer(self):
+        with self._lock:
+            self._live_viewers += 1
+
+    def remove_live_viewer(self):
+        with self._lock:
+            self._live_viewers = max(0, self._live_viewers - 1)
+
+    def has_live_viewers(self):
+        with self._lock:
+            return self._live_viewers > 0
+
+    def get_latest_frame(self):
+        with self._lock:
+            return self._last_frame
+
+    def _set_latest_frame(self, frame):
+        with self._lock:
+            self._last_frame = frame
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
@@ -195,13 +217,15 @@ class MotionMonitor:
         while True:
             try:
                 auto_mode_active, monitoring_chat_id = self._get_monitoring_state()
-                if not auto_mode_active or monitoring_chat_id is None:
+                has_viewers = self.has_live_viewers()
+                if not (auto_mode_active and monitoring_chat_id is not None) and not has_viewers:
                     camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
                         camera_stream,
-                        "Camera đang nghỉ vì radar tắt"
+                        "Camera đang nghỉ vì radar tắt và không có live stream"
                     )
                     self._clear_camera_failure_state()
-                    time.sleep(1)
+                    self._set_latest_frame(None)
+                    time.sleep(0.5)
                     continue
 
                 camera_config = normalize_camera_config(self.ctx.get_settings_snapshot())
@@ -271,8 +295,18 @@ class MotionMonitor:
                     time.sleep(1)
                     continue
                 img = transform_camera_frame(img, active_camera_config)
-                self._set_camera_status(True, f"Camera đang mở bởi radar ({format_camera_config(active_camera_config)})")
+                self._set_latest_frame(img)
+                if auto_mode_active and monitoring_chat_id is not None:
+                    self._set_camera_status(True, f"Camera đang mở bởi radar ({format_camera_config(active_camera_config)})")
+                else:
+                    self._set_camera_status(True, f"Camera đang mở bởi live stream ({format_camera_config(active_camera_config)})")
                 self._clear_camera_failure_state()
+
+                if not (auto_mode_active and monitoring_chat_id is not None):
+                    last_gray_frame = None
+                    fps_delay = 1.0 / active_camera_config["camera_fps"] if active_camera_config["camera_fps"] > 0 else 0.05
+                    time.sleep(fps_delay)
+                    continue
 
                 if time.time() - last_alert_time < self.ctx.get_setting("alert_cooldown_seconds"):
                     last_gray_frame = build_motion_gray(img)

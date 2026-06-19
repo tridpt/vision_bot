@@ -147,6 +147,28 @@ class MotionMonitorTests(unittest.TestCase):
         self.assertIn("CAMERA VẪN CHƯA KẾT NỐI LẠI", repeated)
         self.assertIn("6 lần", repeated)
 
+    def test_live_viewer_management_is_thread_safe_and_reports_correct_state(self):
+        monitor = self.make_monitor()
+        
+        self.assertFalse(monitor.has_live_viewers())
+        self.assertIsNone(monitor.get_latest_frame())
+        
+        monitor.add_live_viewer()
+        self.assertTrue(monitor.has_live_viewers())
+        
+        dummy_frame = object()
+        monitor._set_latest_frame(dummy_frame)
+        self.assertEqual(monitor.get_latest_frame(), dummy_frame)
+        
+        monitor.add_live_viewer()
+        self.assertTrue(monitor.has_live_viewers())
+        
+        monitor.remove_live_viewer()
+        self.assertTrue(monitor.has_live_viewers())
+        
+        monitor.remove_live_viewer()
+        self.assertFalse(monitor.has_live_viewers())
+
 
 if __name__ == "__main__":
     unittest.main()
