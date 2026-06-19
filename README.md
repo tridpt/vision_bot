@@ -1,5 +1,10 @@
 # Vision Bot
 
+[![CI](https://github.com/YOUR_USERNAME/vision_bot/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/vision_bot/actions/workflows/ci.yml)
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+
 Vision Bot là bot giám sát webcam chạy local trên Windows. Bot điều khiển qua Telegram, có thể chụp ảnh theo yêu cầu, bật radar phát hiện chuyển động, gửi ảnh/video cảnh báo, lưu lịch sử và có dashboard local để xem trạng thái.
 
 ## Tính năng chính
