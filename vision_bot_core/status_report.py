@@ -52,6 +52,39 @@ def format_daily_summary_schedule(settings_snapshot):
     return f"{status} lúc {hour:02d}:{minute:02d}"
 
 
+def get_quiet_hours_schedule(settings_snapshot):
+    enabled = resolve_status_flag(settings_snapshot.get("quiet_hours_enabled"), default=False)
+    start_hour = safe_int(settings_snapshot.get("quiet_hours_start_hour"), 22)
+    end_hour = safe_int(settings_snapshot.get("quiet_hours_end_hour"), 7)
+    start_hour = max(0, min(start_hour, 23))
+    end_hour = max(0, min(end_hour, 23))
+    return enabled, start_hour, end_hour
+
+
+def is_within_quiet_hours(settings_snapshot, now_hour=None):
+    enabled, start_hour, end_hour = get_quiet_hours_schedule(settings_snapshot)
+    if not enabled or start_hour == end_hour:
+        return False
+
+    if now_hour is None:
+        now_hour = time.localtime().tm_hour
+    now_hour = max(0, min(safe_int(now_hour, 0), 23))
+
+    if start_hour < end_hour:
+        return start_hour <= now_hour < end_hour
+    # Khung giờ vắt qua nửa đêm, ví dụ 22h -> 7h
+    return now_hour >= start_hour or now_hour < end_hour
+
+
+def format_quiet_hours_schedule(settings_snapshot):
+    enabled, start_hour, end_hour = get_quiet_hours_schedule(settings_snapshot)
+    if not enabled:
+        return "TẮT"
+    if start_hour == end_hour:
+        return "TẮT (giờ bắt đầu trùng giờ kết thúc)"
+    return f"BẬT {start_hour:02d}:00-{end_hour:02d}:00"
+
+
 def format_duration(seconds):
     seconds = max(0, int(seconds))
     days, remainder = divmod(seconds, 86400)
@@ -108,6 +141,8 @@ def format_status_message(ctx):
     logs_size = format_size(get_directory_size(ctx.log_dir, log_error=ctx.log_error))
     settings_snapshot = ctx.get_settings_snapshot()
     daily_summary_text = format_daily_summary_schedule(settings_snapshot)
+    quiet_hours_text = format_quiet_hours_schedule(settings_snapshot)
+    quiet_now = " (đang trong giờ yên lặng)" if is_within_quiet_hours(settings_snapshot) else ""
 
     return (
         "🩺 TRẠNG THÁI SỨC KHỎE VISION BOT\n\n"
@@ -118,6 +153,7 @@ def format_status_message(ctx):
         f"ℹ️ Camera chi tiết: {camera_status}\n\n"
         "📊 THỐNG KÊ\n"
         f"📅 Tóm tắt hằng ngày: {daily_summary_text}\n"
+        f"🌙 Giờ yên lặng: {quiet_hours_text}{quiet_now}\n"
         f"🧾 Cảnh báo trong lịch sử: {alert_count}/{settings_snapshot['alert_history_limit']}\n"
         f"💾 Dung lượng logs: {logs_size}\n"
         f"⏳ Uptime: {uptime}\n"

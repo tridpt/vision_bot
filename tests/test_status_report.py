@@ -10,6 +10,9 @@ from vision_bot_core.status_report import (
     format_size,
     format_status_message,
     get_directory_size,
+    get_quiet_hours_schedule,
+    is_within_quiet_hours,
+    format_quiet_hours_schedule,
 )
 
 
@@ -23,6 +26,56 @@ class StatusReportTests(unittest.TestCase):
         self.assertEqual(format_size(512), "512 B")
         self.assertEqual(format_size(1024), "1.0 KB")
         self.assertEqual(format_size(1024 * 1024), "1.0 MB")
+
+    def test_quiet_hours_overnight_window(self):
+        settings = {
+            "quiet_hours_enabled": True,
+            "quiet_hours_start_hour": 22,
+            "quiet_hours_end_hour": 7,
+        }
+        self.assertTrue(is_within_quiet_hours(settings, now_hour=23))
+        self.assertTrue(is_within_quiet_hours(settings, now_hour=0))
+        self.assertTrue(is_within_quiet_hours(settings, now_hour=6))
+        self.assertFalse(is_within_quiet_hours(settings, now_hour=7))
+        self.assertFalse(is_within_quiet_hours(settings, now_hour=12))
+        self.assertFalse(is_within_quiet_hours(settings, now_hour=21))
+
+    def test_quiet_hours_same_day_window(self):
+        settings = {
+            "quiet_hours_enabled": True,
+            "quiet_hours_start_hour": 9,
+            "quiet_hours_end_hour": 17,
+        }
+        self.assertTrue(is_within_quiet_hours(settings, now_hour=9))
+        self.assertTrue(is_within_quiet_hours(settings, now_hour=16))
+        self.assertFalse(is_within_quiet_hours(settings, now_hour=17))
+        self.assertFalse(is_within_quiet_hours(settings, now_hour=8))
+
+    def test_quiet_hours_disabled_or_equal_bounds(self):
+        disabled = {
+            "quiet_hours_enabled": False,
+            "quiet_hours_start_hour": 22,
+            "quiet_hours_end_hour": 7,
+        }
+        self.assertFalse(is_within_quiet_hours(disabled, now_hour=2))
+
+        equal_bounds = {
+            "quiet_hours_enabled": True,
+            "quiet_hours_start_hour": 5,
+            "quiet_hours_end_hour": 5,
+        }
+        self.assertFalse(is_within_quiet_hours(equal_bounds, now_hour=5))
+
+    def test_quiet_hours_schedule_helpers(self):
+        settings = {
+            "quiet_hours_enabled": True,
+            "quiet_hours_start_hour": 22,
+            "quiet_hours_end_hour": 7,
+        }
+        self.assertEqual(get_quiet_hours_schedule(settings), (True, 22, 7))
+        self.assertEqual(format_quiet_hours_schedule(settings), "BẬT 22:00-07:00")
+        settings["quiet_hours_enabled"] = False
+        self.assertEqual(format_quiet_hours_schedule(settings), "TẮT")
 
     def test_get_directory_size_counts_nested_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:

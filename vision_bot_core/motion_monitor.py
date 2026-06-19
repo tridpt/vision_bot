@@ -15,6 +15,7 @@ from .camera_tools import (
     transform_camera_frame,
     warm_up_camera,
 )
+from .status_report import is_within_quiet_hours
 
 
 PERSON_FILTER_PROMPT = (
@@ -288,6 +289,11 @@ class MotionMonitor:
                 co_chuyen_dong = has_large_motion(last_gray_frame, gray, motion_area_threshold)
 
                 if co_chuyen_dong:
+                    if is_within_quiet_hours(self.ctx.get_settings_snapshot()):
+                        last_gray_frame = gray
+                        time.sleep(0.1)
+                        continue
+
                     last_alert_time = time.time()
                     self._set_last_alert_timestamp(last_alert_time)
                     alert_id = self.ctx.make_alert_id(last_alert_time)

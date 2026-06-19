@@ -7,6 +7,7 @@ Vision Bot là bot giám sát webcam chạy local trên Windows. Bot điều khi
 - Điều khiển bot qua Telegram bằng lệnh hoặc nút trong `/menu`.
 - Chụp ảnh webcam và phân tích bằng Gemini.
 - Radar phát hiện chuyển động bằng OpenCV.
+- Giờ yên lặng: trong khung giờ chọn, radar vẫn quét nhưng bot không gửi cảnh báo (hỗ trợ khung vắt qua nửa đêm).
 - Khi có cảnh báo, bot gửi ảnh và có thể gửi video ngắn 5-10 giây.
 - Lưu lịch sử cảnh báo gồm ảnh, video, thời gian, phân tích Gemini và setting lúc cảnh báo.
 - Tự xóa media cũ khi lịch sử vượt giới hạn đã chọn.
@@ -117,6 +118,9 @@ Dashboard chỉ mở trên máy đang chạy bot. Nếu dùng điện thoại kh
 | `/set_video_fps <fps>` | Chỉnh FPS video cảnh báo |
 | `/video_on` / `/video_off` | Bật hoặc tắt gửi video |
 | `/ai_on` / `/ai_off` | Bật hoặc tắt phân tích Gemini khi cảnh báo |
+| `/quiet_hours_on` / `/quiet_hours_off` | Bật hoặc tắt giờ yên lặng |
+| `/set_quiet_start <giờ>` | Chỉnh giờ bắt đầu yên lặng (0-23) |
+| `/set_quiet_end <giờ>` | Chỉnh giờ kết thúc yên lặng (0-23) |
 | Nhắn text bất kỳ | Bot chụp ảnh webcam và phân tích theo nội dung bạn hỏi |
 
 ## Menu Telegram
@@ -147,6 +151,9 @@ Setting được lưu vào `settings.json`, nên vẫn còn sau khi restart bot.
 | `alert_video_fps` | FPS video cảnh báo | `5-30` |
 | `send_video` | Có gửi video khi cảnh báo không | Bật/Tắt |
 | `use_gemini_analysis` | Có phân tích Gemini khi cảnh báo không | Bật/Tắt |
+| `quiet_hours_enabled` | Bật giờ yên lặng (radar quét nhưng không báo động) | Bật/Tắt |
+| `quiet_hours_start_hour` | Giờ bắt đầu yên lặng | `0-23` |
+| `quiet_hours_end_hour` | Giờ kết thúc yên lặng | `0-23` |
 | `alert_history_limit` | Số cảnh báo giữ trong lịch sử | `10`, `50`, `100` |
 
 Có thể chỉnh setting ở cả Telegram và dashboard. Cả hai đều lưu lâu dài vào `settings.json`.

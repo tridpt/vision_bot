@@ -18,6 +18,9 @@ DEFAULT_SETTINGS = {
     "daily_summary_enabled": False,
     "daily_summary_hour": 8,
     "daily_summary_minute": 0,
+    "quiet_hours_enabled": False,
+    "quiet_hours_start_hour": 22,
+    "quiet_hours_end_hour": 7,
     "alert_history_limit": 50,
     "camera_index": 0,
     "camera_width": 0,
@@ -34,6 +37,8 @@ SETTING_LIMITS = {
     "alert_history_limit": (10, 100),
     "daily_summary_hour": (0, 23),
     "daily_summary_minute": (0, 59),
+    "quiet_hours_start_hour": (0, 23),
+    "quiet_hours_end_hour": (0, 23),
     "camera_index": (0, 2),
     "camera_width": (0, 3840),
     "camera_height": (0, 2160),
@@ -56,6 +61,9 @@ SETTING_LABELS = {
     "daily_summary_enabled": "gửi tóm tắt hằng ngày",
     "daily_summary_hour": "giờ tóm tắt hằng ngày",
     "daily_summary_minute": "phút tóm tắt hằng ngày",
+    "quiet_hours_enabled": "giờ yên lặng",
+    "quiet_hours_start_hour": "giờ bắt đầu yên lặng",
+    "quiet_hours_end_hour": "giờ kết thúc yên lặng",
     "alert_history_limit": "số cảnh báo giữ trong lịch sử",
     "camera_index": "camera index",
     "camera_width": "chiều rộng camera",
@@ -73,6 +81,9 @@ SETTING_UNITS = {
     "daily_summary_enabled": "",
     "daily_summary_hour": "",
     "daily_summary_minute": "",
+    "quiet_hours_enabled": "",
+    "quiet_hours_start_hour": " giờ",
+    "quiet_hours_end_hour": " giờ",
     "alert_history_limit": " cảnh báo",
     "camera_index": "",
     "camera_width": " px",
@@ -90,6 +101,9 @@ SETTING_EXAMPLES = {
     "daily_summary_enabled": "bat",
     "daily_summary_hour": "8",
     "daily_summary_minute": "0",
+    "quiet_hours_enabled": "bat",
+    "quiet_hours_start_hour": "22",
+    "quiet_hours_end_hour": "7",
     "alert_history_limit": "50",
     "camera_index": "0",
     "camera_width": "1280",
@@ -159,6 +173,10 @@ def normalize_settings(raw_settings):
     normalized["daily_summary_enabled"] = normalize_bool(
         normalized["daily_summary_enabled"],
         DEFAULT_SETTINGS["daily_summary_enabled"]
+    )
+    normalized["quiet_hours_enabled"] = normalize_bool(
+        normalized["quiet_hours_enabled"],
+        DEFAULT_SETTINGS["quiet_hours_enabled"]
     )
     return normalized
 

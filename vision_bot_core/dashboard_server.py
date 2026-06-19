@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
-from .status_report import format_daily_summary_schedule
+from .status_report import format_daily_summary_schedule, format_quiet_hours_schedule
 
 
 @dataclass
@@ -378,6 +378,8 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
         "alert_video_fps",
         "daily_summary_hour",
         "daily_summary_minute",
+        "quiet_hours_start_hour",
+        "quiet_hours_end_hour",
         "camera_width",
         "camera_height",
         "camera_fps"
@@ -392,6 +394,8 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
             hint = "0-23 giờ local của máy đang chạy bot."
         if field == "daily_summary_minute":
             hint = "0-59 phút local của máy đang chạy bot."
+        if field in ("quiet_hours_start_hour", "quiet_hours_end_hour"):
+            hint = "0-23 giờ local. Hỗ trợ khung vắt qua nửa đêm, ví dụ 22 đến 7."
         rows.append(
             "<tr>"
             f'<th><label for="setting_{field}">{escape_html(ctx.setting_labels[field])}</label></th>'
@@ -454,6 +458,19 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
         f'<option value="false"{selected_attr(settings_snapshot["daily_summary_enabled"], False)}>TẮT</option>'
         "</select>"
         '<span class="setting-hint">Tự động gửi một bản tóm tắt trạng thái hằng ngày đến Telegram.</span>'
+        "</td>"
+        "</tr>"
+    )
+
+    rows.append(
+        "<tr>"
+        f'<th><label for="setting_quiet_hours_enabled">{escape_html(ctx.setting_labels["quiet_hours_enabled"])}</label></th>'
+        "<td>"
+        f'<select id="setting_quiet_hours_enabled" name="quiet_hours_enabled">'
+        f'<option value="true"{selected_attr(settings_snapshot["quiet_hours_enabled"], True)}>BẬT</option>'
+        f'<option value="false"{selected_attr(settings_snapshot["quiet_hours_enabled"], False)}>TẮT</option>'
+        "</select>"
+        '<span class="setting-hint">Trong khung giờ yên lặng, radar vẫn quét nhưng bot không gửi báo động.</span>'
         "</td>"
         "</tr>"
     )
@@ -561,6 +578,9 @@ def render_settings_backup_detail(ctx, data):
         "daily_summary_enabled",
         "daily_summary_hour",
         "daily_summary_minute",
+        "quiet_hours_enabled",
+        "quiet_hours_start_hour",
+        "quiet_hours_end_hour",
         "alert_history_limit",
         "camera_index",
         "camera_width",
@@ -870,6 +890,10 @@ def update_dashboard_settings(ctx, form):
         form.get("daily_summary_enabled", [current["daily_summary_enabled"]])[0],
         current["daily_summary_enabled"]
     )
+    updates["quiet_hours_enabled"] = bool_from_dashboard(
+        form.get("quiet_hours_enabled", [current["quiet_hours_enabled"]])[0],
+        current["quiet_hours_enabled"]
+    )
 
     for field, value in updates.items():
         ctx.update_setting(field, value)
@@ -913,6 +937,7 @@ def render_dashboard_html(
     radar_status = "BẬT" if ctx.is_radar_active() else "TẮT"
     camera_health = "SỐNG" if camera_ok else "CHẾT"
     daily_summary_text = format_daily_summary_schedule(settings_snapshot)
+    quiet_hours_text = format_quiet_hours_schedule(settings_snapshot)
     logs_size = ctx.format_size(ctx.get_directory_size(ctx.log_dir))
     uptime = ctx.format_duration(time.time() - ctx.bot_start_time)
     last_alert_text = ctx.format_timestamp(ctx.last_alert_timestamp())
@@ -944,6 +969,7 @@ def render_dashboard_html(
         <tr><th>Radar</th><td>{escape_html(radar_status)}</td></tr>
         <tr><th>Camera</th><td>{escape_html(camera_health)} - {escape_html(camera_status)}</td></tr>
         <tr><th>Tóm tắt hằng ngày</th><td>{escape_html(daily_summary_text)}</td></tr>
+        <tr><th>Giờ yên lặng</th><td>{escape_html(quiet_hours_text)}</td></tr>
         <tr><th>Lần cảnh báo gần nhất</th><td>{escape_html(last_alert_text)}</td></tr>
         <tr><th>Uptime</th><td>{escape_html(uptime)}</td></tr>
         <tr><th>Dashboard local</th><td>{escape_html(ctx.url)}</td></tr>

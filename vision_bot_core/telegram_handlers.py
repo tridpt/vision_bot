@@ -396,6 +396,38 @@ def register_telegram_handlers(ctx):
         if not verify_user(message): return
         set_boolean_setting(message, "daily_summary_enabled", False, "tóm tắt trạng thái hằng ngày")
 
+    @bot.message_handler(commands=['quiet_hours_on'])
+    def turn_quiet_hours_on(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "quiet_hours_enabled", True, "giờ yên lặng")
+
+    @bot.message_handler(commands=['quiet_hours_off'])
+    def turn_quiet_hours_off(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "quiet_hours_enabled", False, "giờ yên lặng")
+
+    @bot.message_handler(commands=['set_quiet_start'])
+    def set_quiet_start(message):
+        if not verify_user(message): return
+        set_numeric_setting(
+            message,
+            "quiet_hours_start_hour",
+            "/set_quiet_start",
+            "giờ bắt đầu yên lặng",
+            " giờ"
+        )
+
+    @bot.message_handler(commands=['set_quiet_end'])
+    def set_quiet_end(message):
+        if not verify_user(message): return
+        set_numeric_setting(
+            message,
+            "quiet_hours_end_hour",
+            "/set_quiet_end",
+            "giờ kết thúc yên lặng",
+            " giờ"
+        )
+
     @bot.message_handler(commands=['set_daily_summary_hour'])
     def set_daily_summary_hour(message):
         if not verify_user(message): return
@@ -643,6 +675,12 @@ def register_telegram_handlers(ctx):
         if call.data == "setting:toggle_daily_summary":
             ctx.update_setting("daily_summary_enabled", not ctx.get_setting("daily_summary_enabled"))
             bot.answer_callback_query(call.id, "Đã cập nhật tóm tắt hằng ngày")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data == "setting:toggle_quiet_hours":
+            ctx.update_setting("quiet_hours_enabled", not ctx.get_setting("quiet_hours_enabled"))
+            bot.answer_callback_query(call.id, "Đã cập nhật giờ yên lặng")
             edit_menu_message(call, format_settings_message(), build_settings_menu())
             return
 
