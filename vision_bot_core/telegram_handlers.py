@@ -4,8 +4,6 @@ import time
 from dataclasses import dataclass
 
 from .settings_store import (
-    CAMERA_INDEX_CHOICES,
-    CAMERA_ROTATION_CHOICES,
     HISTORY_LIMIT_CHOICES,
     SETTING_LABELS,
     SETTING_LIMITS,

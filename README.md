@@ -218,6 +218,14 @@ Chạy unit test:
 python -m unittest discover -s tests
 ```
 
+Soát lint bằng Ruff:
+
+```powershell
+ruff check .
+```
+
+Cấu hình lint nằm trong `ruff.toml`. Quy tắc E701 được bỏ qua vì các handler dùng style guard-clause một dòng (`if not verify_user(message): return`) một cách nhất quán.
+
 Kiểm tra compile nhanh:
 
 ```powershell
@@ -225,6 +233,6 @@ $files = rg --files -g "*.py"
 python -m py_compile @files
 ```
 
-GitHub Actions cũng tự chạy unit test và compile sau mỗi lần push. Xem kết quả ở tab `Actions` của repo trên GitHub hoặc dấu trạng thái cạnh commit.
+GitHub Actions cũng tự chạy lint, unit test và compile sau mỗi lần push. Xem kết quả ở tab `Actions` của repo trên GitHub hoặc dấu trạng thái cạnh commit.
 
 Các module chính nên đặt trong `vision_bot_core/`. Giữ `bot_giam_sat.py` ở root để script chạy nền Windows vẫn hoạt động ổn định.

@@ -14,6 +14,7 @@ from vision_bot_core.dashboard_server import (
     normalize_dashboard_tab,
     render_dashboard_html,
     restore_selected_dashboard_backup,
+    update_dashboard_settings,
 )
 from vision_bot_core.settings_store import DEFAULT_SETTINGS, SETTING_LABELS, SETTING_LIMITS, SETTING_UNITS
 
@@ -25,6 +26,9 @@ def make_dashboard_context(
     deleted=None,
     log_dir="logs",
     history_entries=None,
+    settings_snapshot=None,
+    updated=None,
+    use_real_clamp=False,
 ):
     if restored is None:
         restored = []
@@ -32,6 +36,21 @@ def make_dashboard_context(
         deleted = []
     if history_entries is None:
         history_entries = []
+    if settings_snapshot is None:
+        settings_snapshot = DEFAULT_SETTINGS.copy()
+    if updated is None:
+        updated = {}
+
+    if use_real_clamp:
+        def clamp_int(value, default, min_value, max_value):
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                number = default
+            return max(min_value, min(number, max_value))
+    else:
+        def clamp_int(value, default, min_value, max_value):
+            return default
 
     return DashboardContext(
         host="127.0.0.1",
@@ -43,7 +62,7 @@ def make_dashboard_context(
         setting_units=SETTING_UNITS,
         history_limit_choices=(10, 50, 100),
         bot_start_time=0,
-        get_settings_snapshot=lambda: DEFAULT_SETTINGS.copy(),
+        get_settings_snapshot=lambda: dict(settings_snapshot),
         get_alert_history_snapshot=lambda limit=None: list(history_entries),
         get_camera_status=lambda: (False, "Camera chưa kiểm tra"),
         is_radar_active=lambda: False,
@@ -57,7 +76,7 @@ def make_dashboard_context(
         is_safe_alert_media_path=lambda path: False,
         absolute_from_base=lambda path: path,
         delete_alert_history_entry=lambda alert_id: False,
-        update_setting=lambda name, value: None,
+        update_setting=lambda name, value: updated.__setitem__(name, value),
         trim_alert_history=lambda limit: None,
         scan_cameras=lambda: "scan result",
         test_camera=lambda: {"ok": False, "message": "test result", "path": ""},
@@ -87,7 +106,7 @@ def make_dashboard_context(
         restore_latest_settings_backup=lambda: None,
         restore_latest_alert_history_backup=lambda: None,
         delete_backup=lambda backup: deleted.append(backup) or True,
-        clamp_int=lambda value, default, min_value, max_value: default,
+        clamp_int=clamp_int,
         log_error=lambda context, error=None: None,
     )
 
@@ -249,6 +268,52 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("daily_summary_minute", html)
         self.assertIn("/scan-cameras", html)
         self.assertIn("/test-camera", html)
+
+    def test_render_settings_tab_includes_quiet_hours_controls(self):
+        html = render_dashboard_html(make_dashboard_context(), active_tab="settings")
+
+        self.assertIn("quiet_hours_enabled", html)
+        self.assertIn("quiet_hours_start_hour", html)
+        self.assertIn("quiet_hours_end_hour", html)
+
+    def test_render_status_tab_shows_quiet_hours_row(self):
+        snapshot = DEFAULT_SETTINGS.copy()
+        snapshot["quiet_hours_enabled"] = True
+        snapshot["quiet_hours_start_hour"] = 22
+        snapshot["quiet_hours_end_hour"] = 7
+        html = render_dashboard_html(
+            make_dashboard_context(settings_snapshot=snapshot),
+            active_tab="status",
+        )
+
+        self.assertIn("Giờ yên lặng", html)
+        self.assertIn("BẬT 22:00-07:00", html)
+
+    def test_update_dashboard_settings_applies_quiet_hours(self):
+        updated = {}
+        ctx = make_dashboard_context(updated=updated, use_real_clamp=True)
+
+        update_dashboard_settings(ctx, {
+            "quiet_hours_enabled": ["true"],
+            "quiet_hours_start_hour": ["23"],
+            "quiet_hours_end_hour": ["6"],
+        })
+
+        self.assertTrue(updated["quiet_hours_enabled"])
+        self.assertEqual(updated["quiet_hours_start_hour"], 23)
+        self.assertEqual(updated["quiet_hours_end_hour"], 6)
+
+    def test_update_dashboard_settings_clamps_quiet_hours_out_of_range(self):
+        updated = {}
+        ctx = make_dashboard_context(updated=updated, use_real_clamp=True)
+
+        update_dashboard_settings(ctx, {
+            "quiet_hours_start_hour": ["99"],
+            "quiet_hours_end_hour": ["-5"],
+        })
+
+        self.assertEqual(updated["quiet_hours_start_hour"], 23)
+        self.assertEqual(updated["quiet_hours_end_hour"], 0)
 
     def test_render_status_tab_includes_health_cards(self):
         html = render_dashboard_html(make_dashboard_context(), active_tab="status")

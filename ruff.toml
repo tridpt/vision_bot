@@ -1,0 +1,13 @@
+# Cấu hình lint cho Vision Bot.
+# Bỏ qua các thư mục môi trường và build.
+extend-exclude = [
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+]
+
+[lint]
+# E701: cho phép guard-clause một dòng kiểu `if not verify_user(message): return`
+# vì đây là style cố ý dùng nhất quán trong toàn bộ handler.
+ignore = ["E701"]

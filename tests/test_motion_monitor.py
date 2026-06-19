@@ -105,6 +105,48 @@ class MotionMonitorTests(unittest.TestCase):
         self.assertTrue(should_alert)
         self.assertTrue(repeated_alert)
 
+    def test_register_camera_failure_stays_silent_within_repeat_window(self):
+        monitor = self.make_monitor()
+        monitor._camera_failure_count = 5
+        monitor._last_camera_issue_alert_time = 300
+
+        with patch("vision_bot_core.motion_monitor.time.time", return_value=360):
+            failure_count, should_alert, repeated_alert = monitor._register_camera_failure("Camera vẫn rớt")
+
+        self.assertEqual(failure_count, 6)
+        self.assertFalse(should_alert)
+        self.assertTrue(repeated_alert)
+
+    def test_set_radar_state_without_chat_id_keeps_previous_chat(self):
+        monitor = self.make_monitor()
+
+        monitor.set_radar_state(True, chat_id=789)
+        self.assertEqual(monitor.get_monitoring_chat_id(), 789)
+
+        monitor.set_radar_state(False)
+        self.assertEqual(monitor.get_monitoring_chat_id(), 789)
+
+    def test_clear_camera_failure_state_resets_counters(self):
+        monitor = self.make_monitor()
+        monitor._register_camera_failure("Camera rớt")
+        self.assertEqual(monitor._camera_failure_count, 1)
+
+        monitor._clear_camera_failure_state()
+
+        self.assertEqual(monitor._camera_failure_count, 0)
+        self.assertEqual(monitor._last_camera_issue_alert_time, 0)
+
+    def test_build_camera_issue_alert_message_differs_for_repeated_alert(self):
+        monitor = self.make_monitor()
+        config = {"camera_index": 0, "camera_width": 0, "camera_height": 0, "camera_fps": 0, "camera_rotation": 0}
+
+        first = monitor._build_camera_issue_alert_message("Camera rớt", config, 1, repeated_alert=False)
+        repeated = monitor._build_camera_issue_alert_message("Camera rớt", config, 6, repeated_alert=True)
+
+        self.assertIn("CAMERA BỊ RỚT", first)
+        self.assertIn("CAMERA VẪN CHƯA KẾT NỐI LẠI", repeated)
+        self.assertIn("6 lần", repeated)
+
 
 if __name__ == "__main__":
     unittest.main()
