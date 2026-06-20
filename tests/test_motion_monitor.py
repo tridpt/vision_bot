@@ -217,6 +217,53 @@ class MotionMonitorTests(unittest.TestCase):
         self.assertEqual(len(alerts_added), 1)
         self.assertEqual(alerts_added[0]["id"], "input_alert-id")
 
+    def test_handle_input_intrusion_skips_camera_photo_when_disabled(self):
+        messages_sent = []
+        photos_sent = []
+        alerts_added = []
+        
+        class MockBot:
+            def send_message(self, chat_id, text):
+                messages_sent.append(text)
+            def send_photo(self, chat_id, photo, caption=None):
+                photos_sent.append(caption)
+                
+        settings = {
+            "send_input_camera_photo": False,
+            "person_filter_enabled": False,
+            "send_screen_record": False,
+        }
+        ctx = MotionMonitorContext(
+            bot=MockBot(),
+            log_dir="logs",
+            get_setting=lambda name: settings.get(name, True),
+            get_settings_snapshot=lambda: settings,
+            add_alert_history=lambda entry: alerts_added.append(entry),
+            make_alert_id=lambda timestamp: "alert-id",
+            ensure_log_dir=lambda: None,
+            relative_to_base=lambda path: path,
+            ask_ai=lambda image_path, question: "PERSON",
+            log_error=lambda context, error=None: None,
+        )
+        monitor = MotionMonitor(ctx)
+        
+        monitor.set_radar_state(True, chat_id=123)
+        dummy_frame = object()
+        monitor._set_latest_frame(dummy_frame)
+        monitor._last_input_alert_time = 0
+        
+        with patch("vision_bot_core.motion_monitor.save_frame") as mock_save:
+            monitor._handle_input_intrusion()
+            # Since person_filter_enabled is False and send_input_camera_photo is False,
+            # we optimized it to not even save/grab the frame!
+            mock_save.assert_not_called()
+            
+        self.assertIn("CẢNH BÁO XÂM NHẬP KHẨN CẤP", messages_sent[0])
+        self.assertEqual(photos_sent, [])
+        self.assertEqual(len(alerts_added), 1)
+        self.assertEqual(alerts_added[0]["id"], "input_alert-id")
+        self.assertIsNone(alerts_added[0]["image_path"])
+
     def test_start_input_listeners_respects_setting(self):
         settings = {"input_monitoring_enabled": False}
         ctx = MotionMonitorContext(

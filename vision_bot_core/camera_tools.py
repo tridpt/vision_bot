@@ -264,3 +264,62 @@ def record_alert_video(camera_stream, first_frame, video_path, duration_seconds,
     if read_failed:
         return True, f"Camera dừng sớm, đã gửi phần video ghi được ({codec_label})"
     return True, f"Đã ghi clip {duration_seconds} giây ({codec_label})"
+
+
+def record_screen_video(video_path, duration_seconds, fps):
+    from PIL import ImageGrab
+    import numpy as np
+
+    try:
+        first_grab = ImageGrab.grab()
+    except Exception as e:
+        return False, f"Không chụp được màn hình: {e}"
+
+    first_frame = np.array(first_grab)
+    if len(first_frame.shape) == 3 and first_frame.shape[2] == 4:
+        first_frame = cv2.cvtColor(first_frame, cv2.COLOR_RGBA2BGR)
+    elif len(first_frame.shape) == 3 and first_frame.shape[2] == 3:
+        first_frame = cv2.cvtColor(first_frame, cv2.COLOR_RGB2BGR)
+
+    height, width = first_frame.shape[:2]
+    width -= width % 2
+    height -= height % 2
+    frame_size = (width, height)
+
+    writer, codec_label = create_alert_video_writer(video_path, fps, frame_size)
+    if writer is None:
+        return False, "Không tạo được file video màn hình"
+
+    frames_written = 0
+    end_time = time.time() + duration_seconds
+    next_frame_time = time.time()
+
+    try:
+        while time.time() < end_time:
+            img = ImageGrab.grab()
+            frame = np.array(img)
+            if len(frame.shape) == 3 and frame.shape[2] == 4:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+            elif len(frame.shape) == 3 and frame.shape[2] == 3:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+            writer.write(frame[:height, :width])
+            frames_written += 1
+
+            next_frame_time += 1.0 / fps
+            delay = next_frame_time - time.time()
+            if delay > 0:
+                time.sleep(delay)
+            else:
+                time.sleep(0.01)
+    except Exception as e:
+        writer.release()
+        return False, f"Lỗi khi quay màn hình: {e}"
+    finally:
+        writer.release()
+
+    if frames_written == 0 or not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+        return False, "Video màn hình rỗng"
+
+    return True, f"Đã ghi clip màn hình {duration_seconds} giây ({codec_label})"
+

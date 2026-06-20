@@ -681,7 +681,9 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
     for field, label in (
         ("motion_detection_enabled", "Quan sát chuyển động camera"),
         ("input_monitoring_enabled", "Giám sát bàn phím/chuột"),
-        ("send_video", "Gửi video cảnh báo"),
+        ("send_video", "Gửi video cảnh báo (Camera)"),
+        ("send_screen_record", "Quay màn hình khi đụng phím/chuột"),
+        ("send_input_camera_photo", "Gửi ảnh camera khi đụng phím/chuột"),
         ("use_gemini_analysis", "Phân tích Gemini"),
         ("person_filter_enabled", "Chỉ cảnh báo khi thấy người")
     ):
@@ -778,6 +780,8 @@ def render_settings_backup_detail(ctx, data):
         "alert_video_seconds",
         "alert_video_fps",
         "send_video",
+        "send_screen_record",
+        "send_input_camera_photo",
         "use_gemini_analysis",
         "person_filter_enabled",
         "motion_detection_enabled",
@@ -1108,6 +1112,14 @@ def update_dashboard_settings(ctx, form):
     updates["input_monitoring_enabled"] = bool_from_dashboard(
         form.get("input_monitoring_enabled", [current["input_monitoring_enabled"]])[0],
         current["input_monitoring_enabled"]
+    )
+    updates["send_screen_record"] = bool_from_dashboard(
+        form.get("send_screen_record", [current["send_screen_record"]])[0],
+        current["send_screen_record"]
+    )
+    updates["send_input_camera_photo"] = bool_from_dashboard(
+        form.get("send_input_camera_photo", [current["send_input_camera_photo"]])[0],
+        current["send_input_camera_photo"]
     )
 
     forced = False

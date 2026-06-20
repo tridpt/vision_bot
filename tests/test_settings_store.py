@@ -63,6 +63,8 @@ class SettingsStoreTests(unittest.TestCase):
             "use_gemini_analysis": "yes",
             "motion_detection_enabled": "off",
             "input_monitoring_enabled": "bat",
+            "send_screen_record": "off",
+            "send_input_camera_photo": "off",
         })
 
         self.assertEqual(normalized["motion_area_threshold"], 500)
@@ -83,6 +85,9 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertTrue(normalized["use_gemini_analysis"])
         self.assertFalse(normalized["motion_detection_enabled"])
         self.assertTrue(normalized["input_monitoring_enabled"])
+        self.assertFalse(normalized["send_screen_record"])
+        self.assertFalse(normalized["send_input_camera_photo"])
+
 
     def test_normalize_settings_forces_at_least_one_monitoring_active(self):
         normalized = settings_store.normalize_settings({

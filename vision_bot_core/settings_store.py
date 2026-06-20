@@ -28,7 +28,9 @@ DEFAULT_SETTINGS = {
     "camera_fps": 0,
     "camera_rotation": 0,
     "motion_detection_enabled": True,
-    "input_monitoring_enabled": True
+    "input_monitoring_enabled": True,
+    "send_screen_record": True,
+    "send_input_camera_photo": True
 }
 
 SETTING_LIMITS = {
@@ -73,7 +75,9 @@ SETTING_LABELS = {
     "camera_fps": "FPS camera",
     "camera_rotation": "góc xoay camera",
     "motion_detection_enabled": "quan sát chuyển động camera",
-    "input_monitoring_enabled": "giám sát bàn phím/chuột"
+    "input_monitoring_enabled": "giám sát bàn phím/chuột",
+    "send_screen_record": "gửi video quay màn hình khi đụng phím/chuột",
+    "send_input_camera_photo": "gửi ảnh camera khi đụng phím/chuột"
 }
 
 SETTING_UNITS = {
@@ -95,7 +99,9 @@ SETTING_UNITS = {
     "camera_fps": " fps",
     "camera_rotation": " độ",
     "motion_detection_enabled": "",
-    "input_monitoring_enabled": ""
+    "input_monitoring_enabled": "",
+    "send_screen_record": "",
+    "send_input_camera_photo": ""
 }
 
 SETTING_EXAMPLES = {
@@ -117,7 +123,9 @@ SETTING_EXAMPLES = {
     "camera_fps": "30",
     "camera_rotation": "180",
     "motion_detection_enabled": "bat",
-    "input_monitoring_enabled": "bat"
+    "input_monitoring_enabled": "bat",
+    "send_screen_record": "bat",
+    "send_input_camera_photo": "bat"
 }
 
 _settings_file = None
@@ -193,6 +201,14 @@ def normalize_settings(raw_settings):
     normalized["input_monitoring_enabled"] = normalize_bool(
         normalized["input_monitoring_enabled"],
         DEFAULT_SETTINGS["input_monitoring_enabled"]
+    )
+    normalized["send_screen_record"] = normalize_bool(
+        normalized["send_screen_record"],
+        DEFAULT_SETTINGS["send_screen_record"]
+    )
+    normalized["send_input_camera_photo"] = normalize_bool(
+        normalized["send_input_camera_photo"],
+        DEFAULT_SETTINGS["send_input_camera_photo"]
     )
     if not normalized["motion_detection_enabled"] and not normalized["input_monitoring_enabled"]:
         normalized["motion_detection_enabled"] = True

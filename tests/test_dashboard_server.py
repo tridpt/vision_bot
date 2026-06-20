@@ -267,6 +267,8 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("daily_summary_enabled", html)
         self.assertIn("daily_summary_hour", html)
         self.assertIn("daily_summary_minute", html)
+        self.assertIn("send_screen_record", html)
+        self.assertIn("send_input_camera_photo", html)
         self.assertIn("/scan-cameras", html)
         self.assertIn("/test-camera", html)
 
