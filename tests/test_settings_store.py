@@ -61,6 +61,8 @@ class SettingsStoreTests(unittest.TestCase):
             "daily_summary_minute": "61",
             "send_video": "off",
             "use_gemini_analysis": "yes",
+            "motion_detection_enabled": "off",
+            "input_monitoring_enabled": "bat",
         })
 
         self.assertEqual(normalized["motion_area_threshold"], 500)
@@ -79,7 +81,18 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertEqual(normalized["daily_summary_minute"], 59)
         self.assertFalse(normalized["send_video"])
         self.assertTrue(normalized["use_gemini_analysis"])
+        self.assertFalse(normalized["motion_detection_enabled"])
+        self.assertTrue(normalized["input_monitoring_enabled"])
+
+    def test_normalize_settings_forces_at_least_one_monitoring_active(self):
+        normalized = settings_store.normalize_settings({
+            "motion_detection_enabled": "off",
+            "input_monitoring_enabled": "off",
+        })
+        self.assertTrue(normalized["motion_detection_enabled"])
+        self.assertFalse(normalized["input_monitoring_enabled"])
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -679,6 +679,8 @@ def render_dashboard_settings_form(ctx, settings_snapshot):
     )
 
     for field, label in (
+        ("motion_detection_enabled", "Quan sát chuyển động camera"),
+        ("input_monitoring_enabled", "Giám sát bàn phím/chuột"),
         ("send_video", "Gửi video cảnh báo"),
         ("use_gemini_analysis", "Phân tích Gemini"),
         ("person_filter_enabled", "Chỉ cảnh báo khi thấy người")
@@ -778,6 +780,8 @@ def render_settings_backup_detail(ctx, data):
         "send_video",
         "use_gemini_analysis",
         "person_filter_enabled",
+        "motion_detection_enabled",
+        "input_monitoring_enabled",
         "daily_summary_enabled",
         "daily_summary_hour",
         "daily_summary_minute",
@@ -1097,12 +1101,27 @@ def update_dashboard_settings(ctx, form):
         form.get("quiet_hours_enabled", [current["quiet_hours_enabled"]])[0],
         current["quiet_hours_enabled"]
     )
+    updates["motion_detection_enabled"] = bool_from_dashboard(
+        form.get("motion_detection_enabled", [current["motion_detection_enabled"]])[0],
+        current["motion_detection_enabled"]
+    )
+    updates["input_monitoring_enabled"] = bool_from_dashboard(
+        form.get("input_monitoring_enabled", [current["input_monitoring_enabled"]])[0],
+        current["input_monitoring_enabled"]
+    )
+
+    forced = False
+    if not updates["motion_detection_enabled"] and not updates["input_monitoring_enabled"]:
+        updates["motion_detection_enabled"] = True
+        forced = True
 
     for field, value in updates.items():
         ctx.update_setting(field, value)
 
     if updates["alert_history_limit"] != current["alert_history_limit"]:
         ctx.trim_alert_history(updates["alert_history_limit"])
+
+    return forced
 
 
 def render_dashboard_html(
@@ -1677,6 +1696,8 @@ def make_dashboard_handler(ctx):
                     notice = "Không tìm thấy cảnh báo để xóa."
                 elif query.get("saved") == ["1"]:
                     notice = "Đã lưu setting."
+                elif query.get("saved") == ["2"]:
+                    notice = "Đã lưu setting. Lưu ý: Không thể tắt cả 2 chế độ cùng lúc, hệ thống đã tự động bật lại Giám sát camera!"
                 elif query.get("restore_settings") == ["1"]:
                     notice = "Đã khôi phục setting từ backup gần nhất."
                 elif query.get("restore_settings") == ["0"]:
@@ -1821,8 +1842,9 @@ def make_dashboard_handler(ctx):
                 return
 
             if parsed_url.path == "/update-settings":
-                update_dashboard_settings(ctx, form)
-                redirect_dashboard(self, "/?" + urlencode({"tab": "settings", "saved": "1"}))
+                forced = update_dashboard_settings(ctx, form)
+                saved_param = "2" if forced else "1"
+                redirect_dashboard(self, "/?" + urlencode({"tab": "settings", "saved": saved_param}))
                 return
 
             if parsed_url.path == "/restore-settings-backup":

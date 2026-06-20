@@ -26,7 +26,9 @@ DEFAULT_SETTINGS = {
     "camera_width": 0,
     "camera_height": 0,
     "camera_fps": 0,
-    "camera_rotation": 0
+    "camera_rotation": 0,
+    "motion_detection_enabled": True,
+    "input_monitoring_enabled": True
 }
 
 SETTING_LIMITS = {
@@ -69,7 +71,9 @@ SETTING_LABELS = {
     "camera_width": "chiều rộng camera",
     "camera_height": "chiều cao camera",
     "camera_fps": "FPS camera",
-    "camera_rotation": "góc xoay camera"
+    "camera_rotation": "góc xoay camera",
+    "motion_detection_enabled": "quan sát chuyển động camera",
+    "input_monitoring_enabled": "giám sát bàn phím/chuột"
 }
 
 SETTING_UNITS = {
@@ -89,7 +93,9 @@ SETTING_UNITS = {
     "camera_width": " px",
     "camera_height": " px",
     "camera_fps": " fps",
-    "camera_rotation": " độ"
+    "camera_rotation": " độ",
+    "motion_detection_enabled": "",
+    "input_monitoring_enabled": ""
 }
 
 SETTING_EXAMPLES = {
@@ -109,7 +115,9 @@ SETTING_EXAMPLES = {
     "camera_width": "1280",
     "camera_height": "720",
     "camera_fps": "30",
-    "camera_rotation": "180"
+    "camera_rotation": "180",
+    "motion_detection_enabled": "bat",
+    "input_monitoring_enabled": "bat"
 }
 
 _settings_file = None
@@ -178,6 +186,16 @@ def normalize_settings(raw_settings):
         normalized["quiet_hours_enabled"],
         DEFAULT_SETTINGS["quiet_hours_enabled"]
     )
+    normalized["motion_detection_enabled"] = normalize_bool(
+        normalized["motion_detection_enabled"],
+        DEFAULT_SETTINGS["motion_detection_enabled"]
+    )
+    normalized["input_monitoring_enabled"] = normalize_bool(
+        normalized["input_monitoring_enabled"],
+        DEFAULT_SETTINGS["input_monitoring_enabled"]
+    )
+    if not normalized["motion_detection_enabled"] and not normalized["input_monitoring_enabled"]:
+        normalized["motion_detection_enabled"] = True
     return normalized
 
 
@@ -221,6 +239,9 @@ def get_settings_snapshot():
 def update_setting(name, value):
     with _settings_lock:
         _settings[name] = value
+        normalized = normalize_settings(_settings)
+        _settings.clear()
+        _settings.update(normalized)
         save_settings(_settings.copy())
 
 

@@ -404,6 +404,32 @@ def register_telegram_handlers(ctx):
         if not verify_user(message): return
         set_boolean_setting(message, "quiet_hours_enabled", False, "giờ yên lặng")
 
+    @bot.message_handler(commands=['motion_on'])
+    def turn_motion_on(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "motion_detection_enabled", True, "giám sát chuyển động camera")
+
+    @bot.message_handler(commands=['motion_off'])
+    def turn_motion_off(message):
+        if not verify_user(message): return
+        if not ctx.get_setting("input_monitoring_enabled"):
+            bot.reply_to(message, "⚠️ Bạn không thể tắt cả 2 chế độ giám sát cùng lúc. Radar cần ít nhất 1 chế độ hoạt động!")
+            return
+        set_boolean_setting(message, "motion_detection_enabled", False, "giám sát chuyển động camera")
+
+    @bot.message_handler(commands=['input_on'])
+    def turn_input_on(message):
+        if not verify_user(message): return
+        set_boolean_setting(message, "input_monitoring_enabled", True, "giám sát bàn phím/chuột")
+
+    @bot.message_handler(commands=['input_off'])
+    def turn_input_off(message):
+        if not verify_user(message): return
+        if not ctx.get_setting("motion_detection_enabled"):
+            bot.reply_to(message, "⚠️ Bạn không thể tắt cả 2 chế độ giám sát cùng lúc. Radar cần ít nhất 1 chế độ hoạt động!")
+            return
+        set_boolean_setting(message, "input_monitoring_enabled", False, "giám sát bàn phím/chuột")
+
     @bot.message_handler(commands=['set_quiet_start'])
     def set_quiet_start(message):
         if not verify_user(message): return
@@ -679,6 +705,26 @@ def register_telegram_handlers(ctx):
         if call.data == "setting:toggle_quiet_hours":
             ctx.update_setting("quiet_hours_enabled", not ctx.get_setting("quiet_hours_enabled"))
             bot.answer_callback_query(call.id, "Đã cập nhật giờ yên lặng")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data == "setting:toggle_motion":
+            current_motion = ctx.get_setting("motion_detection_enabled")
+            if current_motion and not ctx.get_setting("input_monitoring_enabled"):
+                bot.answer_callback_query(call.id, "⚠️ Phải có ít nhất 1 chế độ giám sát được bật!", show_alert=True)
+                return
+            ctx.update_setting("motion_detection_enabled", not current_motion)
+            bot.answer_callback_query(call.id, "Đã cập nhật giám sát camera")
+            edit_menu_message(call, format_settings_message(), build_settings_menu())
+            return
+
+        if call.data == "setting:toggle_input":
+            current_input = ctx.get_setting("input_monitoring_enabled")
+            if current_input and not ctx.get_setting("motion_detection_enabled"):
+                bot.answer_callback_query(call.id, "⚠️ Phải có ít nhất 1 chế độ giám sát được bật!", show_alert=True)
+                return
+            ctx.update_setting("input_monitoring_enabled", not current_input)
+            bot.answer_callback_query(call.id, "Đã cập nhật giám sát phím/chuột")
             edit_menu_message(call, format_settings_message(), build_settings_menu())
             return
 

@@ -77,7 +77,9 @@ def format_settings_message():
         f"🎥 Độ dài video: {current['alert_video_seconds']} giây\n"
         f"🎞️ FPS video: {current['alert_video_fps']}\n"
         f"📹 Gửi video: {on_off_label(current['send_video'])}\n"
-        f"🧠 Phân tích Gemini: {on_off_label(current['use_gemini_analysis'])}\n\n"
+        f"🧠 Phân tích Gemini: {on_off_label(current['use_gemini_analysis'])}\n"
+        f"🎯 Giám sát camera: {on_off_label(current['motion_detection_enabled'])}\n"
+        f"⌨️ Giám sát phím/chuột: {on_off_label(current['input_monitoring_enabled'])}\n\n"
         f"🧍 Chỉ cảnh báo khi thấy người: {on_off_label(current['person_filter_enabled'])}\n"
         f"📅 Tóm tắt hằng ngày: {format_daily_summary_schedule(current)}\n"
         f"🌙 Giờ yên lặng: {format_quiet_hours_schedule(current)}\n"
@@ -176,6 +178,8 @@ def build_settings_menu():
     person_filter_label = "🧍 Tắt lọc người" if current["person_filter_enabled"] else "🧍 Bật lọc người"
     daily_summary_label = "📅 Tắt tóm tắt" if current["daily_summary_enabled"] else "📅 Bật tóm tắt"
     quiet_hours_label = "🌙 Tắt giờ yên lặng" if current["quiet_hours_enabled"] else "🌙 Bật giờ yên lặng"
+    motion_label = "🎯 Tắt giám sát camera" if current["motion_detection_enabled"] else "🎯 Bật giám sát camera"
+    input_label = "⌨️ Tắt giám sát phím/chuột" if current["input_monitoring_enabled"] else "⌨️ Bật giám sát phím/chuột"
     camera_index_buttons = [
         telebot.types.InlineKeyboardButton(
             f"{'✅ ' if current['camera_index'] == choice else ''}Cam {choice}",
@@ -210,6 +214,10 @@ def build_settings_menu():
     keyboard.add(
         telebot.types.InlineKeyboardButton(video_label, callback_data="setting:toggle_video"),
         telebot.types.InlineKeyboardButton(ai_label, callback_data="setting:toggle_ai")
+    )
+    keyboard.add(
+        telebot.types.InlineKeyboardButton(motion_label, callback_data="setting:toggle_motion"),
+        telebot.types.InlineKeyboardButton(input_label, callback_data="setting:toggle_input")
     )
     keyboard.add(telebot.types.InlineKeyboardButton(person_filter_label, callback_data="setting:toggle_person_filter"))
     keyboard.add(telebot.types.InlineKeyboardButton(daily_summary_label, callback_data="setting:toggle_daily_summary"))

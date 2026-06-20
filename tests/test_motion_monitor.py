@@ -217,6 +217,60 @@ class MotionMonitorTests(unittest.TestCase):
         self.assertEqual(len(alerts_added), 1)
         self.assertEqual(alerts_added[0]["id"], "input_alert-id")
 
+    def test_start_input_listeners_respects_setting(self):
+        settings = {"input_monitoring_enabled": False}
+        ctx = MotionMonitorContext(
+            bot=object(),
+            log_dir="logs",
+            get_setting=lambda name: settings.get(name, True),
+            get_settings_snapshot=lambda: settings,
+            add_alert_history=lambda entry: None,
+            make_alert_id=lambda timestamp: "alert-id",
+            ensure_log_dir=lambda: None,
+            relative_to_base=lambda path: path,
+            ask_ai=lambda image_path, question: "PERSON",
+            log_error=lambda context, error=None: None,
+        )
+        monitor = MotionMonitor(ctx)
+        
+        import vision_bot_core.motion_monitor
+        with patch.object(vision_bot_core.motion_monitor, "PYNPUT_AVAILABLE", True):
+            monitor._start_input_listeners()
+            self.assertIsNone(monitor._keyboard_listener)
+            self.assertIsNone(monitor._mouse_listener)
+            
+            settings["input_monitoring_enabled"] = True
+            with patch("pynput.keyboard.Listener") as mock_kb, patch("pynput.mouse.Listener") as mock_ms:
+                monitor._start_input_listeners()
+                self.assertIsNotNone(monitor._keyboard_listener)
+                self.assertIsNotNone(monitor._mouse_listener)
+
+    def test_motion_loop_closes_camera_if_both_modes_disabled(self):
+        settings = {"motion_detection_enabled": False, "input_monitoring_enabled": False}
+        ctx = MotionMonitorContext(
+            bot=object(),
+            log_dir="logs",
+            get_setting=lambda name: settings.get(name, True),
+            get_settings_snapshot=lambda: settings,
+            add_alert_history=lambda entry: None,
+            make_alert_id=lambda timestamp: "alert-id",
+            ensure_log_dir=lambda: None,
+            relative_to_base=lambda path: path,
+            ask_ai=lambda image_path, question: "PERSON",
+            log_error=lambda context, error=None: None,
+        )
+        monitor = MotionMonitor(ctx)
+        
+        stream = self.DummyCameraStream()
+        
+        camera_stream, active_camera_config, last_gray_frame = monitor._reset_camera_connection(
+            stream,
+            "both disabled"
+        )
+        self.assertTrue(stream.released)
+        self.assertIsNone(camera_stream)
+
 
 if __name__ == "__main__":
     unittest.main()
+

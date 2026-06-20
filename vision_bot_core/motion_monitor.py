@@ -104,6 +104,8 @@ class MotionMonitor:
     def _start_input_listeners(self):
         if not PYNPUT_AVAILABLE:
             return
+        if not self.ctx.get_setting("input_monitoring_enabled"):
+            return
         try:
             if self._keyboard_listener is None:
                 self._keyboard_listener = keyboard.Listener(on_press=self._on_input_activity)
@@ -361,10 +363,24 @@ class MotionMonitor:
             try:
                 auto_mode_active, monitoring_chat_id = self._get_monitoring_state()
                 has_viewers = self.has_live_viewers()
-                if not (auto_mode_active and monitoring_chat_id is not None) and not has_viewers:
+
+                # Dynamic check for input listeners based on current settings
+                if auto_mode_active and monitoring_chat_id is not None:
+                    if self.ctx.get_setting("input_monitoring_enabled"):
+                        self._start_input_listeners()
+                    else:
+                        self._stop_input_listeners()
+                else:
+                    self._stop_input_listeners()
+
+                motion_enabled = self.ctx.get_setting("motion_detection_enabled")
+                input_enabled = self.ctx.get_setting("input_monitoring_enabled")
+                radar_needs_camera = auto_mode_active and monitoring_chat_id is not None and (motion_enabled or input_enabled)
+
+                if not radar_needs_camera and not has_viewers:
                     camera_stream, active_camera_config, last_gray_frame = self._reset_camera_connection(
                         camera_stream,
-                        "Camera đang nghỉ vì radar tắt và không có live stream"
+                        "Camera đang nghỉ vì radar tắt hoặc cả hai chế độ giám sát camera và phím/chuột đều tắt"
                     )
                     self._clear_camera_failure_state()
                     self._set_latest_frame(None)
@@ -446,6 +462,12 @@ class MotionMonitor:
                 self._clear_camera_failure_state()
 
                 if not (auto_mode_active and monitoring_chat_id is not None):
+                    last_gray_frame = None
+                    fps_delay = 1.0 / active_camera_config["camera_fps"] if active_camera_config["camera_fps"] > 0 else 0.05
+                    time.sleep(fps_delay)
+                    continue
+
+                if not motion_enabled:
                     last_gray_frame = None
                     fps_delay = 1.0 / active_camera_config["camera_fps"] if active_camera_config["camera_fps"] > 0 else 0.05
                     time.sleep(fps_delay)
