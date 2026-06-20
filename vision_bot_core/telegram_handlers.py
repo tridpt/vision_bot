@@ -242,20 +242,6 @@ def register_telegram_handlers(ctx):
         clear_pending_setting_input(message)
         ctx.send_alert_history(message.chat.id)
 
-    @bot.message_handler(commands=['siren_on'])
-    def turn_on_siren(message):
-        if not verify_user(message): return
-        clear_pending_setting_input(message)
-        ctx.update_setting("siren_alarm_enabled", True)
-        bot.reply_to(message, "🚨 Đã BẬT Còi Hú Báo Động! Máy tính sẽ vặn Max Volume và hú còi khi có người lạ.")
-
-    @bot.message_handler(commands=['siren_off'])
-    def turn_off_siren(message):
-        if not verify_user(message): return
-        clear_pending_setting_input(message)
-        ctx.update_setting("siren_alarm_enabled", False)
-        bot.reply_to(message, "🔕 Đã TẮT Còi Hú Báo Động.")
-
     @bot.message_handler(commands=['dashboard'])
     def send_dashboard_link(message):
         if not verify_user(message): return
@@ -789,13 +775,6 @@ def register_telegram_handlers(ctx):
         if call.data == "setting:toggle_input_camera_photo":
             ctx.update_setting("send_input_camera_photo", not ctx.get_setting("send_input_camera_photo"))
             bot.answer_callback_query(call.id, "Đã cập nhật gửi ảnh camera đụng phím")
-            edit_menu_message(call, format_settings_message(), build_settings_menu())
-            return
-
-        if call.data == "setting:toggle_siren":
-            is_on = not ctx.get_setting("siren_alarm_enabled")
-            ctx.update_setting("siren_alarm_enabled", is_on)
-            bot.answer_callback_query(call.id, "Đã bật còi hú" if is_on else "Đã tắt còi hú")
             edit_menu_message(call, format_settings_message(), build_settings_menu())
             return
 

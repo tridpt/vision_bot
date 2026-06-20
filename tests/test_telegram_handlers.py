@@ -98,8 +98,6 @@ class TelegramHandlersTests(unittest.TestCase):
         self.assertIn(("menu",), command_sets)
         self.assertIn(("auto",), command_sets)
         self.assertIn(("stop",), command_sets)
-        self.assertIn(("siren_on",), command_sets)
-        self.assertIn(("siren_off",), command_sets)
         self.assertEqual(len(bot.callback_handlers), 1)
 
     def test_start_command_replies_welcome(self):
@@ -136,30 +134,6 @@ class TelegramHandlersTests(unittest.TestCase):
         self.assertFalse(self.radar_state)
         self.assertEqual(len(bot.replies), 1)
         self.assertIn("Đã TẮT Radar", bot.replies[0][1])
-
-    def test_siren_on_command_updates_setting(self):
-        ctx, bot = self._create_context_and_bot()
-        register_telegram_handlers(ctx)
-        handler = self._get_handler(bot, "siren_on")
-        
-        msg = FakeMessage("/siren_on")
-        handler(msg)
-        
-        self.assertTrue(self.settings["siren_alarm_enabled"])
-        self.assertEqual(len(bot.replies), 1)
-        self.assertIn("Đã BẬT Còi Hú", bot.replies[0][1])
-
-    def test_siren_off_command_updates_setting(self):
-        ctx, bot = self._create_context_and_bot()
-        register_telegram_handlers(ctx)
-        handler = self._get_handler(bot, "siren_off")
-        
-        msg = FakeMessage("/siren_off")
-        handler(msg)
-        
-        self.assertFalse(self.settings["siren_alarm_enabled"])
-        self.assertEqual(len(bot.replies), 1)
-        self.assertIn("Đã TẮT Còi Hú", bot.replies[0][1])
 
     def test_unauthorized_user_is_ignored(self):
         ctx, bot = self._create_context_and_bot()
