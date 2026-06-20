@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, MagicMock
 
 from vision_bot_core.motion_monitor import (
     MotionMonitor,
@@ -287,7 +287,8 @@ class MotionMonitorTests(unittest.TestCase):
             self.assertIsNone(monitor._mouse_listener)
             
             settings["input_monitoring_enabled"] = True
-            with patch("pynput.keyboard.Listener"), patch("pynput.mouse.Listener"):
+            with patch.object(vision_bot_core.motion_monitor, "keyboard", MagicMock(), create=True), \
+                 patch.object(vision_bot_core.motion_monitor, "mouse", MagicMock(), create=True):
                 monitor._start_input_listeners()
                 self.assertIsNotNone(monitor._keyboard_listener)
                 self.assertIsNotNone(monitor._mouse_listener)
