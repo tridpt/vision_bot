@@ -47,36 +47,45 @@ vision_bot/
    └─ nhan_dien.py
 ```
 
-## Cài đặt
+## Cài đặt (Hướng dẫn chi tiết cho người mới)
 
-Yêu cầu:
+Nếu bạn là người hoàn toàn mới, hãy làm theo từng bước sau:
 
-- Python 3.8 trở lên
-- Webcam hoạt động được trên máy
-- Telegram Bot Token
-- Gemini API Key
+### Bước 1: Cài đặt phần mềm cơ bản
+1. Cài đặt **Python** (phiên bản 3.8 trở lên) từ [python.org](https://www.python.org/downloads/). **Quan trọng:** Khi cài đặt, nhớ tích vào ô **"Add Python to PATH"**.
+2. Tải mã nguồn Bot về máy (chọn `Code` -> `Download ZIP` rồi giải nén).
 
-Cài thư viện:
+### Bước 2: Lấy các mã cấu hình bí mật (API Keys)
+Bot cần 3 mã bí mật để hoạt động. Hãy lấy và lưu ra Notepad:
+1. **Telegram Bot Token:**
+   - Mở Telegram, tìm kiếm `@BotFather`.
+   - Nhắn `/newbot`, đặt tên cho Bot của bạn.
+   - BotFather sẽ cấp cho bạn một chuỗi dài (vd: `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`). Đây là Token.
+2. **Telegram User ID:**
+   - Mở Telegram, tìm kiếm `@userinfobot` và nhấn Start.
+   - Nó sẽ trả về ID của bạn (một dãy số, vd: `123456789`). ID này giúp Bot chỉ nhận lệnh từ bạn, chặn người lạ.
+3. **Gemini API Key (Bộ não AI):**
+   - Truy cập [Google AI Studio](https://aistudio.google.com/).
+   - Đăng nhập bằng tài khoản Google, nhấn **"Get API key"** -> **"Create API key"** để lấy mã.
 
-```powershell
-pip install -r requirements.txt
-```
+### Bước 3: Cấu hình Bot
+1. Mở thư mục Vision Bot bạn vừa giải nén.
+2. Đổi tên file `.env.example` thành `.env` (xóa chữ `.example`).
+3. Mở file `.env` bằng Notepad và điền 3 mã bạn vừa lấy vào:
+   ```env
+   TELEGRAM_BOT_TOKEN="Điền_Token_Vào_Đây"
+   GEMINI_API_KEY="Điền_Gemini_Key_Vào_Đây"
+   ALLOWED_USER_ID="Điền_User_ID_Vào_Đây"
+   DASHBOARD_PASSWORD="Tao_Mot_Mat_Khau_Cho_Dashboard_Tuy_Y"
+   ```
 
-Tạo file `.env` từ `.env.example`:
-
-```env
-TELEGRAM_BOT_TOKEN="YOUR_TELEGRAM_BOT_TOKEN_HERE"
-GEMINI_API_KEY="YOUR_GEMINI_API_KEY_HERE"
-ALLOWED_USER_ID="YOUR_TELEGRAM_ID_HERE"
-```
-
-Ghi chú:
-
-- `TELEGRAM_BOT_TOKEN`: lấy từ BotFather.
-- `GEMINI_API_KEY`: lấy từ Google AI Studio.
-- `ALLOWED_USER_ID`: Telegram user id của bạn, có thể lấy bằng bot `@userinfobot`.
-- Có thể thêm `DASHBOARD_PORT=8765` nếu muốn đổi port dashboard.
-- Có thể thêm `BACKUP_MAX_FILES=30` nếu muốn đổi số file backup JSON được giữ lại.
+### Bước 4: Cài đặt thư viện và Cloudflared
+1. Mở thư mục chứa Bot. Nhấn chuột phải vào vùng trống -> chọn **Open in Terminal** (hoặc Open PowerShell window here).
+2. Gõ lệnh sau để cài thư viện:
+   ```powershell
+   pip install -r requirements.txt
+   ```
+3. Tạo thư mục `bin` bên trong thư mục `vision_bot`. Tải file `cloudflared-windows-amd64.exe` từ [Cloudflare](https://github.com/cloudflare/cloudflared/releases) và đổi tên thành `cloudflared.exe`, bỏ vào thư mục `bin`. (Đây là phần mềm giúp bạn xem Dashboard từ xa mà không cần mở Port modem).
 
 ## Cách chạy
 
