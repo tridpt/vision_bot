@@ -34,6 +34,7 @@ from vision_bot_core.camera_tools import (
 )
 from vision_bot_core.dashboard_server import DashboardContext, start_dashboard_server
 from vision_bot_core.gemini_analyzer import ask_ai, configure_gemini_analyzer
+from vision_bot_core.cloudflared_tunnel import CloudflaredTunnel
 from vision_bot_core.motion_monitor import MotionMonitor, MotionMonitorContext
 from vision_bot_core.settings_store import (
     HISTORY_LIMIT_CHOICES,
@@ -658,7 +659,6 @@ def create_telegram_handler_context():
         get_dashboard_url=lambda: cloudflared_tunnel.get_url() or DASHBOARD_URL
     )
 
-from vision_bot_core.cloudflared_tunnel import CloudflaredTunnel
 cloudflared_tunnel = CloudflaredTunnel(DASHBOARD_PORT, logger=log_error)
 
 motion_monitor.start()
