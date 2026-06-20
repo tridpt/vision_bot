@@ -45,6 +45,7 @@ class TelegramHandlersTests(unittest.TestCase):
             schedule_bot_restart=lambda: None,
             tail_error_log=lambda: "log",
             log_error=lambda context, error=None: None,
+            get_dashboard_url=lambda: "http://127.0.0.1:8765",
         )
 
         register_telegram_handlers(ctx)

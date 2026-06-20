@@ -133,7 +133,10 @@ def build_main_menu():
         telebot.types.InlineKeyboardButton("↩️ Khôi phục lịch sử", callback_data="menu:restore_history_confirm"),
         telebot.types.InlineKeyboardButton("🧹 Dọn lịch sử", callback_data="menu:clear_history_confirm")
     )
-    keyboard.add(telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm"))
+    keyboard.add(
+        telebot.types.InlineKeyboardButton("🔗 Link Dashboard", callback_data="menu:dashboard"),
+        telebot.types.InlineKeyboardButton("🔄 Restart bot", callback_data="menu:restart_confirm")
+    )
     return keyboard
 
 

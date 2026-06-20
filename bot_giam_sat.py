@@ -654,8 +654,12 @@ def create_telegram_handler_context():
         test_camera=test_camera_for_chat,
         schedule_bot_restart=schedule_bot_restart,
         tail_error_log=tail_error_log,
-        log_error=log_error
+        log_error=log_error,
+        get_dashboard_url=lambda: cloudflared_tunnel.get_url() or DASHBOARD_URL
     )
+
+from vision_bot_core.cloudflared_tunnel import CloudflaredTunnel
+cloudflared_tunnel = CloudflaredTunnel(DASHBOARD_PORT, logger=log_error)
 
 motion_monitor.start()
 start_daily_status_summary_scheduler()
@@ -666,6 +670,10 @@ if __name__ == "__main__":
         print("❌ LỖI: Token vắng mặt")
     else:
         print("🚀 Khởi chạy hệ điều hành BOT GIÁM SÁT KÉP (Nhận lệnh liên tục!).")
+        cloudflared_tunnel.start()
         start_dashboard_server(create_dashboard_context())
         send_startup_notification()
-        bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        try:
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        finally:
+            cloudflared_tunnel.stop()

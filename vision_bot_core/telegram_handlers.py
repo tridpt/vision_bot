@@ -47,6 +47,7 @@ class TelegramHandlerContext:
     schedule_bot_restart: object
     tail_error_log: object
     log_error: object
+    get_dashboard_url: object
 
 
 def register_telegram_handlers(ctx):
@@ -240,6 +241,13 @@ def register_telegram_handlers(ctx):
         if not verify_user(message): return
         clear_pending_setting_input(message)
         ctx.send_alert_history(message.chat.id)
+
+    @bot.message_handler(commands=['dashboard'])
+    def send_dashboard_link(message):
+        if not verify_user(message): return
+        clear_pending_setting_input(message)
+        url = ctx.get_dashboard_url()
+        bot.reply_to(message, f"🔗 **Dashboard Online**\n\nLink truy cập: {url}\n\n*Lưu ý: Bạn cần nhập mật khẩu DASHBOARD_PASSWORD đã cấu hình trong .env để đăng nhập.*", parse_mode="Markdown")
 
     @bot.message_handler(commands=['settings'])
     def send_settings(message):
@@ -516,6 +524,16 @@ def register_telegram_handlers(ctx):
         if call.data == "menu:status":
             bot.answer_callback_query(call.id)
             edit_menu_message(call, ctx.build_status_message(), build_main_menu())
+            return
+
+        if call.data == "menu:dashboard":
+            bot.answer_callback_query(call.id, "Đang tạo link Dashboard")
+            url = ctx.get_dashboard_url()
+            bot.send_message(
+                call.message.chat.id, 
+                f"🔗 **Dashboard Online**\n\nLink truy cập: {url}\n\n*Lưu ý: Bạn cần nhập mật khẩu DASHBOARD_PASSWORD đã cấu hình trong .env để đăng nhập.*", 
+                parse_mode="Markdown"
+            )
             return
 
         if call.data == "menu:capture":
