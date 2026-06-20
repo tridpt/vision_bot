@@ -30,7 +30,8 @@ DEFAULT_SETTINGS = {
     "motion_detection_enabled": True,
     "input_monitoring_enabled": True,
     "send_screen_record": True,
-    "send_input_camera_photo": True
+    "send_input_camera_photo": True,
+    "siren_alarm_enabled": False
 }
 
 SETTING_LIMITS = {
@@ -77,7 +78,8 @@ SETTING_LABELS = {
     "motion_detection_enabled": "quan sát chuyển động camera",
     "input_monitoring_enabled": "giám sát bàn phím/chuột",
     "send_screen_record": "gửi video quay màn hình khi đụng phím/chuột",
-    "send_input_camera_photo": "gửi ảnh camera khi đụng phím/chuột"
+    "send_input_camera_photo": "gửi ảnh camera khi đụng phím/chuột",
+    "siren_alarm_enabled": "còi hú báo động"
 }
 
 SETTING_UNITS = {
@@ -101,7 +103,8 @@ SETTING_UNITS = {
     "motion_detection_enabled": "",
     "input_monitoring_enabled": "",
     "send_screen_record": "",
-    "send_input_camera_photo": ""
+    "send_input_camera_photo": "",
+    "siren_alarm_enabled": ""
 }
 
 SETTING_EXAMPLES = {
@@ -125,7 +128,8 @@ SETTING_EXAMPLES = {
     "motion_detection_enabled": "bat",
     "input_monitoring_enabled": "bat",
     "send_screen_record": "bat",
-    "send_input_camera_photo": "bat"
+    "send_input_camera_photo": "bat",
+    "siren_alarm_enabled": "bat"
 }
 
 _settings_file = None

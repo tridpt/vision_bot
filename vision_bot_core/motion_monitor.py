@@ -1,6 +1,11 @@
 import os
 import threading
+import subprocess
 import time
+try:
+    import winsound
+except ImportError:
+    pass
 from dataclasses import dataclass
 
 from .camera_tools import (
@@ -135,6 +140,29 @@ class MotionMonitor:
                 return
         threading.Thread(target=self._handle_input_intrusion, daemon=True).start()
 
+    def _play_siren(self):
+        if not self.ctx.get_setting("siren_alarm_enabled"):
+            return
+            
+        def siren_thread():
+            try:
+                creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                subprocess.run(
+                    ["powershell", "-Command", "$obj = new-object -com wscript.shell; 1..50 | % { $obj.SendKeys([char]175) }"],
+                    creationflags=creationflags
+                )
+                
+                if 'winsound' in globals():
+                    for _ in range(5):
+                        for freq in range(500, 1500, 50):
+                            winsound.Beep(freq, 20)
+                        for freq in range(1500, 500, -50):
+                            winsound.Beep(freq, 20)
+            except Exception as e:
+                self.ctx.log_error("Loi khi phat coi hu", e)
+
+        threading.Thread(target=siren_thread, daemon=True).start()
+
     def _handle_input_intrusion(self):
         auto_mode_active, monitoring_chat_id = self._get_monitoring_state()
         if not auto_mode_active or monitoring_chat_id is None:
@@ -185,6 +213,7 @@ class MotionMonitor:
                 "🚨 CẢNH BÁO XÂM NHẬP KHẨN CẤP!\n"
                 "Phát hiện có hoạt động tác động trên Bàn phím/Chuột máy tính của bạn!"
             )
+            self._play_siren()
         except Exception as e:
             self.ctx.log_error("Khong gui duoc tin nhan canh bao nhap ban phim", e)
 
@@ -571,6 +600,7 @@ class MotionMonitor:
                             self.ctx.log_error("Gemini loi khi loc canh bao co nguoi", e)
 
                     self.ctx.bot.send_message(monitoring_chat_id, "🚨 BÁO ĐỘNG KÍCH HOẠT: Phát hiện có sự dịch chuyển lớn trong phòng!")
+                    self._play_siren()
 
                     if self.ctx.get_setting("send_video"):
                         video_path = os.path.join(self.ctx.log_dir, f"alert_{alert_id}.mp4")

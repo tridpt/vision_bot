@@ -187,6 +187,7 @@ def build_settings_menu():
     input_label = "⌨️ Tắt giám sát phím/chuột" if current["input_monitoring_enabled"] else "⌨️ Bật giám sát phím/chuột"
     screen_record_label = "🖥️ Tắt quay màn hình" if current["send_screen_record"] else "🖥️ Bật quay màn hình"
     input_camera_photo_label = "📸 Tắt ảnh camera đụng phím" if current["send_input_camera_photo"] else "📸 Bật ảnh camera đụng phím"
+    siren_label = "🚨 Tắt còi hú báo động" if current["siren_alarm_enabled"] else "🚨 Bật còi hú báo động"
     camera_index_buttons = [
         telebot.types.InlineKeyboardButton(
             f"{'✅ ' if current['camera_index'] == choice else ''}Cam {choice}",
@@ -230,7 +231,10 @@ def build_settings_menu():
         telebot.types.InlineKeyboardButton(screen_record_label, callback_data="setting:toggle_screen_record"),
         telebot.types.InlineKeyboardButton(input_camera_photo_label, callback_data="setting:toggle_input_camera_photo")
     )
-    keyboard.add(telebot.types.InlineKeyboardButton(person_filter_label, callback_data="setting:toggle_person_filter"))
+    keyboard.add(
+        telebot.types.InlineKeyboardButton(person_filter_label, callback_data="setting:toggle_person_filter"),
+        telebot.types.InlineKeyboardButton(siren_label, callback_data="setting:toggle_siren")
+    )
     keyboard.add(telebot.types.InlineKeyboardButton(daily_summary_label, callback_data="setting:toggle_daily_summary"))
     keyboard.add(
         telebot.types.InlineKeyboardButton("📅 Nhập giờ tóm tắt", callback_data="setting:input:daily_summary_hour"),
