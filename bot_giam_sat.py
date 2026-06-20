@@ -558,7 +558,7 @@ def create_dashboard_context():
         add_live_viewer=motion_monitor.add_live_viewer,
         remove_live_viewer=motion_monitor.remove_live_viewer,
         get_latest_frame=motion_monitor.get_latest_frame,
-        dashboard_password=DASHBOARD_PASSWORD
+        get_dashboard_password=lambda: get_setting("dashboard_password")
     )
 
 def send_startup_notification():

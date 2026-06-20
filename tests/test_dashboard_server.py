@@ -109,6 +109,7 @@ def make_dashboard_context(
         delete_backup=lambda backup: deleted.append(backup) or True,
         clamp_int=clamp_int,
         log_error=lambda context, error=None: None,
+        get_dashboard_password=lambda: ""
     )
 
 
@@ -419,11 +420,11 @@ class DashboardServerTests(unittest.TestCase):
             def end_headers(self):
                 pass
         
-        ctx.dashboard_password = ""
+        ctx.get_dashboard_password = lambda: ""
         handler = TestHandler()
         self.assertTrue(handler.check_auth())
         
-        ctx.dashboard_password = "testpassword"
+        ctx.get_dashboard_password = lambda: "testpassword"
         handler = TestHandler()
         self.assertFalse(handler.check_auth())
         self.assertEqual(handler.responses, [303])

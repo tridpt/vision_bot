@@ -247,7 +247,20 @@ def register_telegram_handlers(ctx):
         if not verify_user(message): return
         clear_pending_setting_input(message)
         url = ctx.get_dashboard_url()
-        bot.reply_to(message, f"🔗 **Dashboard Online**\n\nLink truy cập: {url}\n\n*Lưu ý: Bạn cần nhập mật khẩu DASHBOARD_PASSWORD đã cấu hình trong .env để đăng nhập.*", parse_mode="Markdown")
+        pw = ctx.get_setting("dashboard_password")
+        bot.reply_to(message, f"🔗 **Dashboard Online**\n\nLink truy cập: {url}\n\n*Mật khẩu hiện tại:* `{pw}`\n_(Dùng lệnh `/set_password <mật_khẩu_mới>` để đổi)_", parse_mode="Markdown")
+
+    @bot.message_handler(commands=['set_password'])
+    def set_password(message):
+        if not verify_user(message): return
+        clear_pending_setting_input(message)
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            bot.reply_to(message, "Thiếu giá trị. Ví dụ: /set_password 123456")
+            return
+        new_pw = parts[1].strip()
+        ctx.update_setting("dashboard_password", new_pw)
+        bot.reply_to(message, f"✅ Đã đổi mật khẩu Dashboard thành: `{new_pw}`", parse_mode="Markdown")
 
     @bot.message_handler(commands=['settings'])
     def send_settings(message):
@@ -529,9 +542,10 @@ def register_telegram_handlers(ctx):
         if call.data == "menu:dashboard":
             bot.answer_callback_query(call.id, "Đang tạo link Dashboard")
             url = ctx.get_dashboard_url()
+            pw = ctx.get_setting("dashboard_password")
             bot.send_message(
                 call.message.chat.id, 
-                f"🔗 **Dashboard Online**\n\nLink truy cập: {url}\n\n*Lưu ý: Bạn cần nhập mật khẩu DASHBOARD_PASSWORD đã cấu hình trong .env để đăng nhập.*", 
+                f"🔗 **Dashboard Online**\n\nLink truy cập: {url}\n\n*Mật khẩu hiện tại:* `{pw}`\n_(Dùng lệnh `/set_password <mật_khẩu_mới>` để đổi)_", 
                 parse_mode="Markdown"
             )
             return

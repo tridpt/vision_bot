@@ -55,7 +55,7 @@ class DashboardContext:
     add_live_viewer: object = None
     remove_live_viewer: object = None
     get_latest_frame: object = None
-    dashboard_password: str = None
+    get_dashboard_password: object = None
 
 
 DASHBOARD_TABS = (
@@ -1657,7 +1657,7 @@ def serve_dashboard_camera_test(ctx, handler):
 def make_dashboard_handler(ctx):
     class DashboardRequestHandler(BaseHTTPRequestHandler):
         def check_auth(self):
-            if not ctx.dashboard_password:
+            if not ctx.get_dashboard_password():
                 return True
             parsed_url = urlparse(self.path)
             if parsed_url.path == "/login":
@@ -1682,7 +1682,7 @@ def make_dashboard_handler(ctx):
             parsed_url = urlparse(self.path)
             if parsed_url.path == "/login":
                 session_cookie = get_dashboard_cookie(self, "session")
-                if ctx.dashboard_password and session_cookie == "authorized":
+                if ctx.get_dashboard_password() and session_cookie == "authorized":
                     redirect_dashboard(self, "/")
                     return
                 body = render_login_page()
@@ -1836,7 +1836,7 @@ def make_dashboard_handler(ctx):
 
             if parsed_url.path == "/login":
                 password = form.get("password", [""])[0]
-                if password == ctx.dashboard_password:
+                if password == ctx.get_dashboard_password():
                     self.send_response(303)
                     self.send_header("Location", "/")
                     self.send_header("Set-Cookie", "session=authorized; Path=/; HttpOnly; SameSite=Lax")
