@@ -249,6 +249,8 @@ def schedule_bot_restart():
     )
 
 # Khởi tạo kết nối
+telebot.apihelper.CONNECT_TIMEOUT = 60
+telebot.apihelper.READ_TIMEOUT = 180
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # Tự động ghim Menu Lệnh lên màn hình chat Telegram
@@ -322,7 +324,7 @@ def send_alert_history(chat_id, limit=HISTORY_PREVIEW_LIMIT):
         if video_path and os.path.exists(video_path):
             try:
                 with open(video_path, "rb") as video:
-                    bot.send_video(chat_id, video, caption=f"🎥 Video cảnh báo #{index}")
+                    bot.send_video(chat_id, video, caption=f"🎥 Video cảnh báo #{index}", timeout=150)
             except Exception as e:
                 log_error(f"Khong gui duoc video lich su #{index}", e)
 

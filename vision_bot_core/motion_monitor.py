@@ -260,7 +260,8 @@ class MotionMonitor:
                         self.ctx.bot.send_video(
                             monitoring_chat_id,
                             video,
-                            caption=f"🎥 Clip quay màn hình {duration} giây\n{video_status}"
+                            caption=f"🎥 Clip quay màn hình {duration} giây\n{video_status}",
+                            timeout=150
                         )
                 except Exception as e:
                     self.ctx.log_error("Da ghi video man hinh nhung gui Telegram that bai", e)
@@ -278,7 +279,7 @@ class MotionMonitor:
         self.ctx.add_alert_history({
             "id": f"input_{alert_id}",
             "timestamp": now,
-            "image_path": self.ctx.relative_to_base(image_path),
+            "image_path": self.ctx.relative_to_base(image_path) if image_path else None,
             "video_path": self.ctx.relative_to_base(video_path) if video_path else None,
             "video_status": video_status,
             "analysis": f"[BÀN PHÍM/CHUỘT] {analysis}",
@@ -589,7 +590,8 @@ class MotionMonitor:
                                     self.ctx.bot.send_video(
                                         monitoring_chat_id,
                                         video,
-                                        caption=f"🎥 Clip cảnh báo {video_seconds} giây\n{video_status}"
+                                        caption=f"🎥 Clip cảnh báo {video_seconds} giây\n{video_status}",
+                                        timeout=150
                                     )
                             except Exception as e:
                                 self.ctx.log_error("Da ghi video canh bao nhung gui Telegram that bai", e)
