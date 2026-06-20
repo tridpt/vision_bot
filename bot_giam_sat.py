@@ -248,6 +248,9 @@ def schedule_bot_restart():
         cwd=BASE_DIR,
         creationflags=creation_flags
     )
+    
+    # Thoát bot cũ sau 1 giây để VBScript kịp nhận diện bot đã tắt và bật lại
+    threading.Timer(1.0, lambda: os._exit(0)).start()
 
 # Khởi tạo kết nối
 telebot.apihelper.CONNECT_TIMEOUT = 60

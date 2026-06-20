@@ -152,11 +152,20 @@ def register_telegram_handlers(ctx):
             bot.reply_to(message, "Đã hủy chỉnh setting.", reply_markup=build_settings_menu())
             return True
 
+        if setting_name == "dashboard_password":
+            ctx.update_setting("dashboard_password", text)
+            bot.reply_to(message, f"✅ Đã đổi mật khẩu Dashboard thành: `{text}`", parse_mode="Markdown", reply_markup=build_settings_menu())
+            return True
+
         try:
             value = int(text)
         except ValueError:
             set_pending_setting_input_from_message(message, setting_name)
             bot.reply_to(message, "Giá trị phải là số nguyên. Nhập lại hoặc gõ hủy.")
+            return True
+
+        if setting_name not in SETTING_LIMITS:
+            bot.reply_to(message, "Lỗi: Setting này không hỗ trợ nhập số.")
             return True
 
         min_value, max_value = SETTING_LIMITS[setting_name]
@@ -721,7 +730,7 @@ def register_telegram_handlers(ctx):
 
         if call.data.startswith("setting:input:"):
             setting_name = call.data.split(":", 2)[2]
-            if setting_name not in SETTING_LIMITS:
+            if setting_name not in SETTING_LIMITS and setting_name != "dashboard_password":
                 bot.answer_callback_query(call.id, "Setting không hợp lệ", show_alert=True)
                 return
 

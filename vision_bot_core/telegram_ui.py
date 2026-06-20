@@ -230,7 +230,10 @@ def build_settings_menu():
         telebot.types.InlineKeyboardButton(screen_record_label, callback_data="setting:toggle_screen_record"),
         telebot.types.InlineKeyboardButton(input_camera_photo_label, callback_data="setting:toggle_input_camera_photo")
     )
-    keyboard.add(telebot.types.InlineKeyboardButton(person_filter_label, callback_data="setting:toggle_person_filter"))
+    keyboard.add(
+        telebot.types.InlineKeyboardButton(person_filter_label, callback_data="setting:toggle_person_filter"),
+        telebot.types.InlineKeyboardButton("🔑 Đổi MK Dashboard", callback_data="setting:input:dashboard_password")
+    )
     keyboard.add(telebot.types.InlineKeyboardButton(daily_summary_label, callback_data="setting:toggle_daily_summary"))
     keyboard.add(
         telebot.types.InlineKeyboardButton("📅 Nhập giờ tóm tắt", callback_data="setting:input:daily_summary_hour"),
