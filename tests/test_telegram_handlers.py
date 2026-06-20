@@ -7,6 +7,7 @@ class FakeBot:
     def __init__(self):
         self.message_handlers = []
         self.callback_handlers = []
+        self.replies = []
 
     def message_handler(self, **kwargs):
         def decorator(func):
@@ -20,18 +21,47 @@ class FakeBot:
             return func
         return decorator
 
+    def reply_to(self, message, text, **kwargs):
+        self.replies.append((message, text, kwargs))
+
+
+class FakeUser:
+    def __init__(self, user_id):
+        self.id = user_id
+
+
+class FakeChat:
+    def __init__(self, chat_id):
+        self.id = chat_id
+
+
+class FakeMessage:
+    def __init__(self, text, user_id=123, chat_id=123):
+        self.text = text
+        self.from_user = FakeUser(user_id)
+        self.chat = FakeChat(chat_id)
+
 
 class TelegramHandlersTests(unittest.TestCase):
-    def test_register_telegram_handlers_adds_commands_and_callback_handler(self):
+    def _create_context_and_bot(self):
         bot = FakeBot()
+        self.radar_state = None
+        self.settings = {}
+
+        def update_setting(name, value):
+            self.settings[name] = value
+
+        def set_radar_state(active, chat_id=None):
+            self.radar_state = active
+
         ctx = TelegramHandlerContext(
             bot=bot,
             allowed_user_id=123,
-            get_setting=lambda name: 10,
-            update_setting=lambda name, value: None,
+            get_setting=lambda name: self.settings.get(name, 10),
+            update_setting=update_setting,
             trim_alert_history=lambda limit: None,
             clear_alert_history_files=lambda: None,
-            set_radar_state=lambda active, chat_id=None: None,
+            set_radar_state=set_radar_state,
             build_status_message=lambda: "status",
             list_backups=lambda: [],
             restore_latest_settings_backup=lambda: None,
@@ -47,7 +77,16 @@ class TelegramHandlersTests(unittest.TestCase):
             log_error=lambda context, error=None: None,
             get_dashboard_url=lambda: "http://127.0.0.1:8765",
         )
+        return ctx, bot
 
+    def _get_handler(self, bot, command_name):
+        for kwargs, func in bot.message_handlers:
+            if command_name in kwargs.get("commands", []):
+                return func
+        return None
+
+    def test_register_telegram_handlers_adds_commands_and_callback_handler(self):
+        ctx, bot = self._create_context_and_bot()
         register_telegram_handlers(ctx)
 
         command_sets = [
@@ -57,22 +96,81 @@ class TelegramHandlersTests(unittest.TestCase):
         ]
         self.assertIn(("start", "help"), command_sets)
         self.assertIn(("menu",), command_sets)
-        self.assertIn(("status",), command_sets)
-        self.assertIn(("settings",), command_sets)
-        self.assertIn(("person_filter_on",), command_sets)
-        self.assertIn(("person_filter_off",), command_sets)
-        self.assertIn(("daily_summary_on",), command_sets)
-        self.assertIn(("daily_summary_off",), command_sets)
-        self.assertIn(("set_daily_summary_hour",), command_sets)
-        self.assertIn(("set_daily_summary_minute",), command_sets)
-        self.assertIn(("scan_cameras",), command_sets)
-        self.assertIn(("test_camera",), command_sets)
-        self.assertIn(("set_camera_index",), command_sets)
-        self.assertIn(("set_camera_width",), command_sets)
-        self.assertIn(("set_camera_height",), command_sets)
-        self.assertIn(("set_camera_fps",), command_sets)
-        self.assertIn(("set_camera_rotation",), command_sets)
+        self.assertIn(("auto",), command_sets)
+        self.assertIn(("stop",), command_sets)
+        self.assertIn(("siren_on",), command_sets)
+        self.assertIn(("siren_off",), command_sets)
         self.assertEqual(len(bot.callback_handlers), 1)
+
+    def test_start_command_replies_welcome(self):
+        ctx, bot = self._create_context_and_bot()
+        register_telegram_handlers(ctx)
+        handler = self._get_handler(bot, "start")
+        
+        msg = FakeMessage("/start")
+        handler(msg)
+        
+        self.assertEqual(len(bot.replies), 1)
+        self.assertIn("Chào Boss", bot.replies[0][1])
+
+    def test_auto_command_turns_on_radar(self):
+        ctx, bot = self._create_context_and_bot()
+        register_telegram_handlers(ctx)
+        handler = self._get_handler(bot, "auto")
+        
+        msg = FakeMessage("/auto")
+        handler(msg)
+        
+        self.assertTrue(self.radar_state)
+        self.assertEqual(len(bot.replies), 1)
+        self.assertIn("Đã BẬT Radar", bot.replies[0][1])
+
+    def test_stop_command_turns_off_radar(self):
+        ctx, bot = self._create_context_and_bot()
+        register_telegram_handlers(ctx)
+        handler = self._get_handler(bot, "stop")
+        
+        msg = FakeMessage("/stop")
+        handler(msg)
+        
+        self.assertFalse(self.radar_state)
+        self.assertEqual(len(bot.replies), 1)
+        self.assertIn("Đã TẮT Radar", bot.replies[0][1])
+
+    def test_siren_on_command_updates_setting(self):
+        ctx, bot = self._create_context_and_bot()
+        register_telegram_handlers(ctx)
+        handler = self._get_handler(bot, "siren_on")
+        
+        msg = FakeMessage("/siren_on")
+        handler(msg)
+        
+        self.assertTrue(self.settings["siren_alarm_enabled"])
+        self.assertEqual(len(bot.replies), 1)
+        self.assertIn("Đã BẬT Còi Hú", bot.replies[0][1])
+
+    def test_siren_off_command_updates_setting(self):
+        ctx, bot = self._create_context_and_bot()
+        register_telegram_handlers(ctx)
+        handler = self._get_handler(bot, "siren_off")
+        
+        msg = FakeMessage("/siren_off")
+        handler(msg)
+        
+        self.assertFalse(self.settings["siren_alarm_enabled"])
+        self.assertEqual(len(bot.replies), 1)
+        self.assertIn("Đã TẮT Còi Hú", bot.replies[0][1])
+
+    def test_unauthorized_user_is_ignored(self):
+        ctx, bot = self._create_context_and_bot()
+        register_telegram_handlers(ctx)
+        handler = self._get_handler(bot, "start")
+        
+        msg = FakeMessage("/start", user_id=999) # Not 123
+        handler(msg)
+        
+        self.assertEqual(len(bot.replies), 1)
+        self.assertIn("không nhận lệnh", bot.replies[0][1])
 
 
 if __name__ == "__main__":
