@@ -17,6 +17,12 @@ from .camera_tools import (
 )
 from .status_report import is_within_quiet_hours
 
+try:
+    from pynput import keyboard, mouse
+    PYNPUT_AVAILABLE = True
+except Exception:
+    PYNPUT_AVAILABLE = False
+
 
 PERSON_FILTER_PROMPT = (
     "Bạn là bộ lọc cảnh báo an ninh. Chỉ trả lời đúng một từ: PERSON hoặc NO_PERSON.\n"
@@ -71,6 +77,9 @@ class MotionMonitor:
         self._thread = None
         self._live_viewers = 0
         self._last_frame = None
+        self._keyboard_listener = None
+        self._mouse_listener = None
+        self._last_input_alert_time = 0
 
     def add_live_viewer(self):
         with self._lock:
@@ -92,6 +101,135 @@ class MotionMonitor:
         with self._lock:
             self._last_frame = frame
 
+    def _start_input_listeners(self):
+        if not PYNPUT_AVAILABLE:
+            return
+        try:
+            if self._keyboard_listener is None:
+                self._keyboard_listener = keyboard.Listener(on_press=self._on_input_activity)
+                self._keyboard_listener.start()
+            if self._mouse_listener is None:
+                self._mouse_listener = mouse.Listener(on_click=self._on_input_activity)
+                self._mouse_listener.start()
+        except Exception as e:
+            self.ctx.log_error("Khong khoi dong duoc pynput listeners", e)
+
+    def _stop_input_listeners(self):
+        try:
+            if self._keyboard_listener is not None:
+                self._keyboard_listener.stop()
+                self._keyboard_listener = None
+            if self._mouse_listener is not None:
+                self._mouse_listener.stop()
+                self._mouse_listener = None
+        except Exception as e:
+            self.ctx.log_error("Khong dung duoc pynput listeners", e)
+
+    def _on_input_activity(self, *args, **kwargs):
+        if len(args) == 4:
+            pressed = args[3]
+            if not pressed:
+                return
+        threading.Thread(target=self._handle_input_intrusion, daemon=True).start()
+
+    def _handle_input_intrusion(self):
+        auto_mode_active, monitoring_chat_id = self._get_monitoring_state()
+        if not auto_mode_active or monitoring_chat_id is None:
+            return
+
+        now = time.time()
+        with self._lock:
+            if now - self._last_input_alert_time < 15:
+                return
+            self._last_input_alert_time = now
+
+        img = self.get_latest_frame()
+        if img is None:
+            time.sleep(0.5)
+            img = self.get_latest_frame()
+
+        if img is None:
+            return
+
+        self.ctx.ensure_log_dir()
+        alert_id = self.ctx.make_alert_id(now)
+        image_path = os.path.join(self.ctx.log_dir, f"alert_input_{alert_id}.jpg")
+        save_frame(image_path, img)
+
+        is_person = False
+        analysis = "Gemini đang tắt"
+        if self.ctx.get_setting("person_filter_enabled"):
+            try:
+                person_filter_answer = self.ctx.ask_ai(image_path, PERSON_FILTER_PROMPT)
+                is_person = parse_person_filter_result(person_filter_answer)
+            except Exception as e:
+                self.ctx.log_error("Loi khi loc nguoi cho canh bao ban phim", e)
+                is_person = True
+        else:
+            is_person = True
+
+        if not is_person:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+            return
+
+        try:
+            self.ctx.bot.send_message(
+                monitoring_chat_id,
+                "🚨 CẢNH BÁO XÂM NHẬP KHẨN CẤP!\n"
+                "Phát hiện có hoạt động tác động trên Bàn phím/Chuột máy tính của bạn!"
+            )
+        except Exception as e:
+            self.ctx.log_error("Khong gui duoc tin nhan canh bao nhap ban phim", e)
+
+        if self.ctx.get_setting("use_gemini_analysis"):
+            try:
+                analysis = self.ctx.ask_ai(
+                    image_path,
+                    "Có người đang gõ bàn phím hoặc chạm chuột máy tính của tôi. "
+                    "Hãy nhìn vào bức ảnh này và mô tả xem họ là ai (mô tả đặc điểm nhận dạng) và họ đang làm gì?"
+                )
+                with open(image_path, 'rb') as photo:
+                    self.ctx.bot.send_photo(
+                        monitoring_chat_id,
+                        photo,
+                        caption=f"🧠 Phân tích kẻ xâm nhập:\n\n{analysis}"
+                    )
+            except Exception as e:
+                self.ctx.log_error("Gemini loi phan tich xam nhap ban phim", e)
+                analysis = f"Lỗi Gemini: {e}"
+                try:
+                    with open(image_path, 'rb') as photo:
+                        self.ctx.bot.send_photo(
+                            monitoring_chat_id,
+                            photo,
+                            caption=f"📸 Ảnh kẻ xâm nhập\n⚠️ Lỗi Gemini: {e}"
+                        )
+                except Exception as send_err:
+                    self.ctx.log_error("Khong gui duoc anh sau khi Gemini loi", send_err)
+        else:
+            try:
+                with open(image_path, 'rb') as photo:
+                    self.ctx.bot.send_photo(
+                        monitoring_chat_id,
+                        photo,
+                        caption="📸 Ảnh kẻ xâm nhập tại thời điểm tác động bàn phím/chuột"
+                    )
+            except Exception as e:
+                self.ctx.log_error("Khong gui duoc anh canh bao ban phim", e)
+
+        self.ctx.add_alert_history({
+            "id": f"input_{alert_id}",
+            "timestamp": now,
+            "image_path": self.ctx.relative_to_base(image_path),
+            "video_path": None,
+            "video_status": "Không ghi video cho sự kiện phím/chuột",
+            "analysis": f"[BÀN PHÍM/CHUỘT] {analysis}",
+            "settings": self.ctx.get_settings_snapshot()
+        })
+
     def start(self):
         if self._thread is not None and self._thread.is_alive():
             return self._thread
@@ -105,6 +243,11 @@ class MotionMonitor:
             self._auto_mode_active = active
             if chat_id is not None:
                 self._monitoring_chat_id = chat_id
+            
+            if active and self._monitoring_chat_id is not None:
+                self._start_input_listeners()
+            else:
+                self._stop_input_listeners()
 
     def is_radar_active(self):
         with self._lock:

@@ -3,3 +3,4 @@ google-genai
 pyTelegramBotAPI
 python-dotenv
 pillow
+pynput

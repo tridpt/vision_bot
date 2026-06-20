@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, mock_open
 
 from vision_bot_core.motion_monitor import (
     MotionMonitor,
@@ -9,6 +9,10 @@ from vision_bot_core.motion_monitor import (
 
 
 class MotionMonitorTests(unittest.TestCase):
+    def setUp(self):
+        import vision_bot_core.motion_monitor
+        vision_bot_core.motion_monitor.PYNPUT_AVAILABLE = False
+
     def make_monitor(self):
         ctx = MotionMonitorContext(
             bot=object(),
@@ -168,6 +172,50 @@ class MotionMonitorTests(unittest.TestCase):
         
         monitor.remove_live_viewer()
         self.assertFalse(monitor.has_live_viewers())
+
+    def test_handle_input_intrusion_sends_telegram_alert(self):
+        messages_sent = []
+        photos_sent = []
+        alerts_added = []
+        
+        class MockBot:
+            def send_message(self, chat_id, text):
+                messages_sent.append(text)
+            def send_photo(self, chat_id, photo, caption=None):
+                photos_sent.append(caption)
+                
+        ctx = MotionMonitorContext(
+            bot=MockBot(),
+            log_dir="logs",
+            get_setting=lambda name: True,
+            get_settings_snapshot=lambda: {},
+            add_alert_history=lambda entry: alerts_added.append(entry),
+            make_alert_id=lambda timestamp: "alert-id",
+            ensure_log_dir=lambda: None,
+            relative_to_base=lambda path: path,
+            ask_ai=lambda image_path, question: "PERSON",
+            log_error=lambda context, error=None: None,
+        )
+        monitor = MotionMonitor(ctx)
+        
+        monitor.set_radar_state(True, chat_id=123)
+        
+        monitor._handle_input_intrusion()
+        self.assertEqual(messages_sent, [])
+        
+        dummy_frame = object()
+        monitor._set_latest_frame(dummy_frame)
+        monitor._last_input_alert_time = 0
+        
+        with patch("vision_bot_core.motion_monitor.save_frame") as mock_save, \
+             patch("builtins.open", mock_open(read_data=b"imagebytes")):
+            monitor._handle_input_intrusion()
+            mock_save.assert_called_once()
+            
+        self.assertIn("CẢNH BÁO XÂM NHẬP KHẨN CẤP", messages_sent[0])
+        self.assertIn("PERSON", photos_sent[0])
+        self.assertEqual(len(alerts_added), 1)
+        self.assertEqual(alerts_added[0]["id"], "input_alert-id")
 
 
 if __name__ == "__main__":
