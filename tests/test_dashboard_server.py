@@ -1,8 +1,11 @@
+import http.client
 import json
 import os
 import tempfile
+import threading
 import unittest
 import zipfile
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from vision_bot_core.dashboard_server import (
@@ -456,6 +459,90 @@ class DashboardServerTests(unittest.TestCase):
         self.assertNotEqual(token_a, token_b)
         self.assertNotEqual(token_a, "authorized")
         self.assertGreaterEqual(len(token_a), 32)
+
+
+class DashboardHttpAuthTests(unittest.TestCase):
+    PASSWORD = "s3cret-pass"
+
+    def setUp(self):
+        ctx = make_dashboard_context()
+        ctx.get_dashboard_password = lambda: self.PASSWORD
+        self.handler_class = make_dashboard_handler(ctx)
+        self.session_token = self.handler_class.session_token
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), self.handler_class)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def request(self, method, path, headers=None, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.request(method, path, body=body, headers=headers or {})
+            response = conn.getresponse()
+            payload = response.read().decode("utf-8", errors="replace")
+            return response.status, dict(response.getheaders()), payload
+        finally:
+            conn.close()
+
+    def login_body(self, password):
+        from urllib.parse import urlencode
+        return urlencode({"password": password})
+
+    def test_root_without_cookie_redirects_to_login(self):
+        status, headers, _ = self.request("GET", "/")
+        self.assertEqual(status, 303)
+        self.assertEqual(headers.get("Location"), "/login")
+
+    def test_login_page_is_served_without_auth(self):
+        status, _, body = self.request("GET", "/login")
+        self.assertEqual(status, 200)
+        self.assertIn("Đăng nhập", body)
+
+    def test_forged_static_cookie_is_rejected(self):
+        status, headers, _ = self.request("GET", "/", headers={"Cookie": "session=authorized"})
+        self.assertEqual(status, 303)
+        self.assertEqual(headers.get("Location"), "/login")
+
+    def test_login_wrong_password_shows_error(self):
+        status, _, body = self.request(
+            "POST",
+            "/login",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            body=self.login_body("wrong"),
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("không chính xác", body)
+
+    def test_login_correct_password_sets_session_cookie(self):
+        status, headers, _ = self.request(
+            "POST",
+            "/login",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            body=self.login_body(self.PASSWORD),
+        )
+        self.assertEqual(status, 303)
+        self.assertEqual(headers.get("Location"), "/")
+        set_cookie = headers.get("Set-Cookie", "")
+        self.assertIn(f"session={self.session_token}", set_cookie)
+        self.assertIn("HttpOnly", set_cookie)
+
+    def test_valid_session_cookie_grants_access(self):
+        status, _, body = self.request(
+            "GET",
+            "/",
+            headers={"Cookie": f"session={self.session_token}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("Vision Bot Dashboard", body)
+
+    def test_protected_media_without_auth_returns_401(self):
+        status, _, body = self.request("GET", "/media?path=logs/secret.jpg")
+        self.assertEqual(status, 401)
+        self.assertIn("Unauthorized", body)
 
 
 if __name__ == "__main__":

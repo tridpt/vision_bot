@@ -6,6 +6,18 @@ import re
 
 CLOUDFLARED_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 
+TRYCLOUDFLARE_URL_PATTERN = re.compile(r'https://[-0-9a-z]+\.trycloudflare\.com')
+
+
+def extract_trycloudflare_url(text):
+    if not text:
+        return None
+    match = TRYCLOUDFLARE_URL_PATTERN.search(text)
+    if match:
+        return match.group(0)
+    return None
+
+
 class CloudflaredTunnel:
     def __init__(self, port, logger=None):
         self.port = port
@@ -56,11 +68,10 @@ class CloudflaredTunnel:
                 creationflags=creationflags
             )
             
-            url_pattern = re.compile(r'https://[-0-9a-z]+\.trycloudflare\.com')
             for line in self.process.stderr:
-                match = url_pattern.search(line)
-                if match:
-                    self.public_url = match.group(0)
+                public_url = extract_trycloudflare_url(line)
+                if public_url:
+                    self.public_url = public_url
                     self._log(f"Public URL: {self.public_url}")
                     break
         except Exception as e:
