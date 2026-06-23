@@ -1,8 +1,10 @@
 import base64
+import hmac
 import html
 import json
 import mimetypes
 import os
+import secrets
 import tempfile
 import threading
 import time
@@ -1655,18 +1657,30 @@ def serve_dashboard_camera_test(ctx, handler):
 
 
 def make_dashboard_handler(ctx):
+    dashboard_session_token = secrets.token_urlsafe(32)
+
     class DashboardRequestHandler(BaseHTTPRequestHandler):
+        session_token = dashboard_session_token
+
+        def session_cookie_is_valid(self):
+            session_cookie = get_dashboard_cookie(self, "session")
+            if not session_cookie:
+                return False
+            return hmac.compare_digest(
+                session_cookie.encode("utf-8"),
+                self.session_token.encode("utf-8")
+            )
+
         def check_auth(self):
             if not ctx.get_dashboard_password():
                 return True
             parsed_url = urlparse(self.path)
             if parsed_url.path == "/login":
                 return True
-            
-            session_cookie = get_dashboard_cookie(self, "session")
-            if session_cookie == "authorized":
+
+            if self.session_cookie_is_valid():
                 return True
-                
+
             if parsed_url.path in ("/live-stream", "/media", "/download-backup", "/download-history-zip"):
                 self.send_response(401)
                 self.end_headers()
@@ -1681,8 +1695,7 @@ def make_dashboard_handler(ctx):
                 return
             parsed_url = urlparse(self.path)
             if parsed_url.path == "/login":
-                session_cookie = get_dashboard_cookie(self, "session")
-                if ctx.get_dashboard_password() and session_cookie == "authorized":
+                if ctx.get_dashboard_password() and self.session_cookie_is_valid():
                     redirect_dashboard(self, "/")
                     return
                 body = render_login_page()
@@ -1836,10 +1849,17 @@ def make_dashboard_handler(ctx):
 
             if parsed_url.path == "/login":
                 password = form.get("password", [""])[0]
-                if password == ctx.get_dashboard_password():
+                expected_password = ctx.get_dashboard_password()
+                if expected_password and hmac.compare_digest(
+                    password.encode("utf-8"),
+                    expected_password.encode("utf-8")
+                ):
                     self.send_response(303)
                     self.send_header("Location", "/")
-                    self.send_header("Set-Cookie", "session=authorized; Path=/; HttpOnly; SameSite=Lax")
+                    self.send_header(
+                        "Set-Cookie",
+                        f"session={self.session_token}; Path=/; HttpOnly; SameSite=Lax"
+                    )
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", "0")
                     self.end_headers()

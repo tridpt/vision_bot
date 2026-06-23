@@ -182,7 +182,7 @@ Dashboard có các tab:
 - `Backup`: lọc backup theo loại, xem/tải nội dung từng backup, khôi phục hoặc xóa một backup cụ thể.
 - `Log lỗi`: xem lỗi nội bộ gần nhất.
 
-Dashboard không dùng mật khẩu trong phiên bản hiện tại. Vì dashboard chỉ bind `127.0.0.1`, nó chỉ mở trên chính máy chạy bot.
+Dashboard yêu cầu đăng nhập bằng `DASHBOARD_PASSWORD`. Khi bật cloudflared tunnel, dashboard sẽ có thêm một URL công khai `https://...trycloudflare.com`, nên việc đặt mật khẩu mạnh là bắt buộc để tránh người lạ xem được camera. Phiên đăng nhập dùng token ngẫu nhiên sinh mới mỗi lần bot khởi động, nên restart bot sẽ buộc đăng nhập lại. Nếu để trống `DASHBOARD_PASSWORD`, dashboard sẽ không yêu cầu mật khẩu (chỉ nên dùng khi không bật tunnel và chỉ truy cập local).
 
 ## Lịch sử và logs
 

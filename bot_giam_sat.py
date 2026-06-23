@@ -120,6 +120,11 @@ DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
 HISTORY_PREVIEW_LIMIT = 3
 BACKUP_MAX_FILES = env_int("BACKUP_MAX_FILES", 30)
 configure_settings_store(SETTINGS_FILE)
+# Nếu người dùng đặt DASHBOARD_PASSWORD trong .env và chưa có mật khẩu dashboard nào
+# được lưu, dùng giá trị từ .env làm mật khẩu khởi tạo. Mật khẩu đặt qua dashboard/Telegram
+# (lưu trong settings.json) sẽ được ưu tiên và không bị .env ghi đè.
+if DASHBOARD_PASSWORD and not get_setting("dashboard_password"):
+    save_setting("dashboard_password", DASHBOARD_PASSWORD)
 configure_gemini_analyzer(GEMINI_API_KEY)
 
 def setup_error_logging():

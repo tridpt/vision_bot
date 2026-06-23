@@ -434,14 +434,28 @@ class DashboardServerTests(unittest.TestCase):
         handler.headers = {"Cookie": "session=wrong"}
         self.assertFalse(handler.check_auth())
         self.assertEqual(handler.responses, [303])
-        
+
+        # Cookie tĩnh đoán được không còn bypass được xác thực.
         handler = TestHandler()
         handler.headers = {"Cookie": "session=authorized"}
+        self.assertFalse(handler.check_auth())
+
+        # Chỉ token phiên ngẫu nhiên thật mới được chấp nhận.
+        handler = TestHandler()
+        handler.headers = {"Cookie": f"session={handler_class.session_token}"}
         self.assertTrue(handler.check_auth())
 
         handler = TestHandler()
         handler.path = "/login"
         self.assertTrue(handler.check_auth())
+
+    def test_dashboard_session_token_is_random_per_handler(self):
+        token_a = make_dashboard_handler(make_dashboard_context()).session_token
+        token_b = make_dashboard_handler(make_dashboard_context()).session_token
+
+        self.assertNotEqual(token_a, token_b)
+        self.assertNotEqual(token_a, "authorized")
+        self.assertGreaterEqual(len(token_a), 32)
 
 
 if __name__ == "__main__":
