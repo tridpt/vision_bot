@@ -250,3 +250,5 @@ python -m py_compile @files
 GitHub Actions cũng tự chạy lint, unit test và compile sau mỗi lần push. Xem kết quả ở tab `Actions` của repo trên GitHub hoặc dấu trạng thái cạnh commit.
 
 Các module chính nên đặt trong `vision_bot_core/`. Giữ `bot_giam_sat.py` ở root để script chạy nền Windows vẫn hoạt động ổn định.
+
+Muốn hiểu sâu cách dự án hoạt động bên trong (vai trò từng module, luồng cảnh báo, mô hình đa luồng, bảo mật dashboard), xem [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
