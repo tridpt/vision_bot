@@ -251,4 +251,4 @@ GitHub Actions cũng tự chạy lint, unit test và compile sau mỗi lần pus
 
 Các module chính nên đặt trong `vision_bot_core/`. Giữ `bot_giam_sat.py` ở root để script chạy nền Windows vẫn hoạt động ổn định.
 
-Muốn hiểu sâu cách dự án hoạt động bên trong (vai trò từng module, luồng cảnh báo, mô hình đa luồng, bảo mật dashboard), xem [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Muốn hiểu sâu cách dự án hoạt động bên trong (vai trò từng module, luồng cảnh báo, mô hình đa luồng, bảo mật dashboard), xem [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Tra cứu nhanh hàm/lớp công khai của từng module xem [`docs/MODULES.md`](docs/MODULES.md).

@@ -17,20 +17,26 @@ Vision Bot là một ứng dụng giám sát **chạy local trên Windows**, g�
 
 Toàn bộ chạy trong **một tiến trình Python duy nhất** với nhiều luồng (thread) phối hợp.
 
+```mermaid
+flowchart TD
+    Root["bot_giam_sat.py<br/>(Composition Root - lắp ráp & tiêm Context)"]
+    Root --> MM["MotionMonitor<br/>(camera + phím/chuột)"]
+    Root --> DS["Dashboard Server<br/>(HTTP + auth)"]
+    Root --> TH["Telegram Handlers<br/>(lệnh / nút)"]
+    Root --> ST["Stores<br/>(settings / history / backup)"]
+    Root --> CF["Cloudflared Tunnel<br/>(tùy chọn)"]
+    MM --> CT["camera_tools<br/>(OpenCV)"]
+    MM --> GM["gemini_analyzer<br/>(ask_ai)"]
+    MM --> ST
+    TH --> GM
+    TH --> ST
+    DS --> ST
+    DS -. live frame .-> MM
+    TH -- thông báo --> User(["Người dùng Telegram"])
+    MM -- cảnh báo --> User
+    CF -. URL công khai .-> DS
 ```
-                 ┌──────────────────────────────────────────────┐
-                 │              bot_giam_sat.py                   │
-                 │        (Composition Root - lắp ráp)            │
-                 └──────────────────────────────────────────────┘
-                     │ tạo & "tiêm" Context cho từng thành phần
-   ┌─────────────┬───┴───────────┬──────────────┬─────────────────┐
-   ▼             ▼               ▼              ▼                 ▼
-MotionMonitor  Dashboard     Telegram        Stores           Cloudflared
-(camera +      Server        Handlers     (settings/history/   Tunnel
- phím/chuột)   (HTTP+auth)   (lệnh/nút)    backup)             (tùy chọn)
-   │             │               │              │
-   └─── ask_ai (Gemini) ◄────────┴── camera_tools (OpenCV) ──────┘
-```
+
 
 ---
 
@@ -79,27 +85,34 @@ camera mới nhất được chia sẻ cho luồng live-stream của dashboard q
 
 ### 4.1. Phát hiện chuyển động → cảnh báo (luồng cốt lõi)
 
+```mermaid
+sequenceDiagram
+    participant Loop as Motion loop
+    participant Cam as camera_tools
+    participant AI as Gemini (ask_ai)
+    participant Hist as alert_history_store
+    participant TG as Telegram
+
+    Loop->>Cam: read_camera_frame()
+    Loop->>Loop: has_large_motion()? (motion_area_threshold)
+    Note over Loop: kiểm tra cooldown + giờ yên lặng
+    opt person_filter_enabled
+        Loop->>AI: ảnh có người không?
+        AI-->>Loop: có / không (nếu không → bỏ qua)
+    end
+    Loop->>Cam: chụp ảnh → logs/alert_*.jpg
+    opt send_video
+        Loop->>Cam: record_alert_video() → logs/alert_*.mp4
+        Note right of Cam: codec avc1→H264→mp4v
+    end
+    opt use_gemini_analysis
+        Loop->>AI: phân tích nội dung ảnh
+        AI-->>Loop: mô tả
+    end
+    Loop->>Hist: add_alert_history(entry + snapshot setting)
+    Loop->>TG: gửi ảnh + video + phân tích
 ```
-Vòng lặp camera (MotionMonitor._motion_detection_loop)
-  │  đọc frame qua camera_tools.read_camera_frame
-  ▼
-So sánh 2 frame (camera_tools.has_large_motion, ngưỡng = motion_area_threshold)
-  │  nếu có chuyển động lớn & qua cooldown & không trong giờ yên lặng
-  ▼
-(tùy chọn) Lọc người: ask_ai(Gemini) → parse_person_filter_result
-  │  nếu person_filter_enabled mà không thấy người → bỏ qua
-  ▼
-Chụp ảnh cảnh báo → lưu logs/alert_*.jpg
-  │
-  ├─ (tùy chọn) Quay video ngắn → camera_tools.record_alert_video → logs/alert_*.mp4
-  │     codec thử lần lượt: avc1 (H.264) → H264 → mp4v (fallback)
-  │
-  ├─ (tùy chọn) Phân tích Gemini nội dung ảnh
-  ▼
-add_alert_history(...)  → ghi vào logs/alert_history.json (kèm setting lúc cảnh báo)
-  ▼
-Gửi ảnh + video + phân tích qua Telegram cho ALLOWED_USER_ID
-```
+
 
 Các yếu tố điều khiển: `motion_area_threshold` (độ nhạy), `alert_cooldown_seconds` (chống
 spam), `quiet_hours_*` (giờ yên lặng — vẫn quét nhưng không báo), `send_video`,
@@ -126,6 +139,8 @@ radar nếu trước đó đang bật (`run_camera_action_with_radar_paused`).
 ---
 
 ## 5. Các module lõi (`vision_bot_core/`)
+
+> Tra cứu chi tiết hàm/lớp công khai của từng module: [`MODULES.md`](MODULES.md).
 
 | Module | Vai trò |
 | --- | --- |
